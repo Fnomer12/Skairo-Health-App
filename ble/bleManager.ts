@@ -30,7 +30,7 @@ export function scanForDevice(
   onDeviceFound: (device: Device) => void,
   onError: (error: Error) => void
 ) {
-  manager.startDeviceScan(null, null, (error, device) => {
+  manager.startDeviceScan(null, {}, (error, device) => {
     if (error) {
       onError(error);
       return;

@@ -8,6 +8,7 @@
     "@sfourdrinier/react-native-ble-plx": "^3.9.2",
     "base-64": "^1.0.0",
     "expo": "^57.0.26",
+    "expo-blur": "~57.0.3",
     "expo-dev-client": "~57.0.19",
     "expo-file-system": "~57.0.7",
     "expo-image-picker": "~57.0.20",

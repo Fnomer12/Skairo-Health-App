@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { ArrowLeft, Bluetooth } from "lucide-react-native";
 import { useBle } from "../context/BleContext";
+import { useTheme, ThemeColors } from "../context/ThemeContext";
 
 type Props = {
   onBack: () => void;
@@ -19,6 +20,8 @@ const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
 const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 
 export default function ConnectScreen({ onBack }: Props) {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const {
     connectedDevice,
     isScanning,
@@ -39,7 +42,7 @@ export default function ConnectScreen({ onBack }: Props) {
     <View style={styles.container}>
       <View style={styles.topRow}>
         <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <ArrowLeft color="#000000" size={22} />
+          <ArrowLeft color={colors.text} size={22} />
         </TouchableOpacity>
         <Text style={styles.title}>Connect Device</Text>
         <View style={{ width: 22 }} />
@@ -47,7 +50,7 @@ export default function ConnectScreen({ onBack }: Props) {
 
       {connectedDevice ? (
         <View style={styles.connectedBox}>
-          <Bluetooth color="#000000" size={32} />
+          <Bluetooth color={colors.text} size={32} />
           <Text style={styles.connectedName}>{connectedDevice.name}</Text>
           <Text style={styles.connectedSub}>Connected</Text>
           <TouchableOpacity style={styles.disconnectButton} onPress={disconnect}>
@@ -57,7 +60,7 @@ export default function ConnectScreen({ onBack }: Props) {
       ) : (
         <>
           <View style={styles.scanRow}>
-            {isScanning && <ActivityIndicator size="small" />}
+            {isScanning && <ActivityIndicator size="small" color={colors.textMuted} />}
             <Text style={styles.scanText}>
               {isScanning ? "Scanning for your device…" : "Scan stopped"}
             </Text>
@@ -78,9 +81,9 @@ export default function ConnectScreen({ onBack }: Props) {
                 onPress={() => connect(item).catch((e) => console.warn(e.message))}
                 disabled={isConnecting}
               >
-                <Bluetooth color="#000000" size={20} />
+                <Bluetooth color={colors.text} size={20} />
                 <Text style={styles.deviceName}>{item.name ?? "Unknown device"}</Text>
-                {isConnecting && <ActivityIndicator size="small" />}
+                {isConnecting && <ActivityIndicator size="small" color={colors.textMuted} />}
               </TouchableOpacity>
             )}
           />
@@ -90,55 +93,57 @@ export default function ConnectScreen({ onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffffff", paddingTop: 60 },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  title: { fontSize: 19, fontWeight: "700", color: "#000000", fontFamily: FONT_BOLD },
-  scanRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    marginBottom: 20,
-  },
-  scanText: { color: "#6b6b6b", fontSize: 14, fontFamily: FONT_MEDIUM },
-  list: { paddingHorizontal: 20, paddingBottom: 40 },
-  emptyText: {
-    textAlign: "center",
-    color: "#6b6b6b",
-    fontSize: 14,
-    marginTop: 40,
-    paddingHorizontal: 20,
-    fontFamily: FONT_MEDIUM,
-  },
-  deviceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "#f2f2f2",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  deviceName: { flex: 1, fontSize: 16, color: "#000000", fontFamily: FONT_MEDIUM },
-  connectedBox: { alignItems: "center", marginTop: 60 },
-  connectedName: { fontSize: 20, fontWeight: "700", color: "#000000", marginTop: 12, fontFamily: FONT_BOLD },
-  connectedSub: { fontSize: 14, color: "#2e7d32", marginTop: 4, fontFamily: FONT_MEDIUM },
-  disconnectButton: {
-    marginTop: 24,
-    paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#000000",
-  },
-  disconnectText: { color: "#000000", fontWeight: "600", fontFamily: FONT_MEDIUM },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background, paddingTop: 60 },
+    topRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: 20,
+      marginBottom: 24,
+    },
+    title: { fontSize: 19, fontWeight: "700", color: colors.text, fontFamily: FONT_BOLD },
+    scanRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      marginBottom: 20,
+    },
+    scanText: { color: colors.textMuted, fontSize: 14, fontFamily: FONT_MEDIUM },
+    list: { paddingHorizontal: 20, paddingBottom: 40 },
+    emptyText: {
+      textAlign: "center",
+      color: colors.textMuted,
+      fontSize: 14,
+      marginTop: 40,
+      paddingHorizontal: 20,
+      fontFamily: FONT_MEDIUM,
+    },
+    deviceRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    deviceName: { flex: 1, fontSize: 16, color: colors.text, fontFamily: FONT_MEDIUM },
+    connectedBox: { alignItems: "center", marginTop: 60 },
+    connectedName: { fontSize: 20, fontWeight: "700", color: colors.text, marginTop: 12, fontFamily: FONT_BOLD },
+    connectedSub: { fontSize: 14, color: colors.success, marginTop: 4, fontFamily: FONT_MEDIUM },
+    disconnectButton: {
+      marginTop: 24,
+      paddingVertical: 10,
+      paddingHorizontal: 24,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.accent,
+    },
+    disconnectText: { color: colors.accent, fontWeight: "600", fontFamily: FONT_MEDIUM },
+  });
+}

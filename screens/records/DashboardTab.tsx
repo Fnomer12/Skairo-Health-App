@@ -1,34 +1,65 @@
-import React, { useMemo } from "react";
-import { View, Text, FlatList, StyleSheet, Platform } from "react-native";
-import Svg, { Rect } from "react-native-svg";
+import React, { useMemo, useState } from "react";
+import {
+  View, Text, FlatList, StyleSheet, Platform, TouchableOpacity,
+  NativeSyntheticEvent, NativeScrollEvent, Animated,
+} from "react-native";
+import { Activity } from "lucide-react-native";
 import { Reading } from "../../db/records";
+import { useTheme, ThemeColors } from "../../context/ThemeContext";
 
 type DashboardReading = Reading & { respiratoryRate?: number };
 
-type Props = { records: Reading[]; loading: boolean };
+type Props = {
+  records: Reading[];
+  loading: boolean;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+};
 
 const MONTH_LABELS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
-const CHART_HEIGHT = 70;
-const CHART_WIDTH = 260;
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MAX_BAR_HEIGHT = 72;
+const RECENT_LIMIT = 10;
 
 function formatDate(iso: string) {
   const d = new Date(iso);
   return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
-function classify(records: Reading[]): { label: string; color: string } {
-  if (records.length === 0) return { label: "No data yet", color: "#9a9a9a" };
-  const latest = records[0];
-  const status = (latest.status || "").toLowerCase();
-  if (status.includes("critical") || status.includes("danger")) return { label: "Needs attention", color: "#c62828" };
-  if (status.includes("warn") || status.includes("elevated")) return { label: "Slightly elevated", color: "#e08a00" };
-  return { label: "Normal range", color: "#2e7d32" };
+function cardColor(status: string | null): string {
+  if (!status) return "#3a3a3a";
+  const s = status.toLowerCase();
+  if (s.includes("critical") || s.includes("danger")) return "#C62828";
+  if (s.includes("warn") || s.includes("elevated")) return "#E08A00";
+  return "#1F8A4C";
 }
 
-export default function DashboardTab({ records, loading }: Props) {
+function classify(records: Reading[], loading: boolean): { label: string; color: string } {
+  if (loading) return { label: "Loading…", color: "#3a3a3a" };
+  if (records.length === 0) return { label: "No data yet", color: "#3a3a3a" };
+  return { label: statusLabel(records[0].status), color: cardColor(records[0].status) };
+}
+
+function statusLabel(status: string | null): string {
+  if (!status) return "No data yet";
+  const s = status.toLowerCase();
+  if (s.includes("critical") || s.includes("danger")) return "Needs attention";
+  if (s.includes("warn") || s.includes("elevated")) return "Slightly elevated";
+  return "Normal range";
+}
+
+export default function DashboardTab({ records, loading, onScroll }: Props) {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
+
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+
   const monthlyCounts = useMemo(() => {
     const counts = new Array(12).fill(0);
-    const thisYear = new Date().getFullYear();
+    const thisYear = now.getFullYear();
     records.forEach((r) => {
       const d = new Date(r.recordedAt);
       if (d.getFullYear() === thisYear) counts[d.getMonth()] += 1;
@@ -37,43 +68,71 @@ export default function DashboardTab({ records, loading }: Props) {
   }, [records]);
 
   const maxCount = Math.max(1, ...monthlyCounts);
-  const barWidth = CHART_WIDTH / 12 - 4;
-  const classification = classify(records);
+  const classification = classify(records, loading);
+  const recentRecords = useMemo(() => records.slice(0, RECENT_LIMIT), [records]);
+  const selectedCount = monthlyCounts[selectedMonth];
+  const isCurrentMonth = selectedMonth === now.getMonth();
 
   return (
-    <FlatList
-      data={records}
+    <Animated.FlatList
+      data={recentRecords}
       keyExtractor={(item) => String(item.id)}
       contentContainerStyle={styles.list}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
       ListHeaderComponent={
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTopRow}>
-            <Text style={styles.summaryTitle}>This year</Text>
-            <View style={[styles.classBadge, { backgroundColor: classification.color }]}>
-              <Text style={styles.classBadgeText}>{classification.label}</Text>
+        <View>
+          <View style={[styles.summaryCard, { backgroundColor: classification.color }]}>
+            <View style={styles.cardIconBleedLarge} pointerEvents="none">
+              <Activity color="rgba(255,255,255,0.14)" size={190} strokeWidth={1.2} />
             </View>
+
+            <View style={styles.summaryTopRow}>
+              <Text style={styles.summaryTitle}>This year</Text>
+              <View style={styles.classBadge}>
+                <Text style={styles.classBadgeText}>{classification.label}</Text>
+              </View>
+            </View>
+
+            <View style={styles.chartRow}>
+              {monthlyCounts.map((count, i) => {
+                const hasData = count > 0;
+                const isSelected = i === selectedMonth;
+                const barHeight = hasData
+                  ? Math.max((count / maxCount) * MAX_BAR_HEIGHT, 8)
+                  : 4;
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.chartColumn}
+                    activeOpacity={0.6}
+                    onPress={() => setSelectedMonth(i)}
+                    hitSlop={{ top: 8, bottom: 8 }}
+                  >
+                    <View style={styles.barTrack}>
+                      <View
+                        style={[
+                          styles.bar,
+                          {
+                            height: barHeight,
+                            backgroundColor: isSelected ? "#ffffff" : hasData ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.16)",
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={[styles.monthLabel, isSelected && styles.monthLabelActive]}>
+                      {MONTH_LABELS[i]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.selectedDetail}>
+              {MONTH_NAMES[selectedMonth]}{isCurrentMonth ? " (this month)" : ""} · {selectedCount} reading{selectedCount === 1 ? "" : "s"}
+            </Text>
           </View>
-          <Svg width={CHART_WIDTH} height={CHART_HEIGHT} style={{ marginTop: 14 }}>
-            {monthlyCounts.map((count, i) => {
-              const h = (count / maxCount) * (CHART_HEIGHT - 16);
-              return (
-                <Rect
-                  key={i}
-                  x={i * (CHART_WIDTH / 12) + 2}
-                  y={CHART_HEIGHT - 16 - h}
-                  width={barWidth}
-                  height={Math.max(h, 2)}
-                  rx={3}
-                  fill={count > 0 ? "#000000" : "#e5e5e5"}
-                />
-              );
-            })}
-          </Svg>
-          <View style={styles.monthLabels}>
-            {MONTH_LABELS.map((m, i) => (
-              <Text key={i} style={styles.monthLabel}>{m}</Text>
-            ))}
-          </View>
+
           <Text style={styles.recentHeading}>Recent takes</Text>
         </View>
       }
@@ -87,9 +146,22 @@ export default function DashboardTab({ records, loading }: Props) {
       }
       renderItem={({ item }) => {
         const rr = (item as DashboardReading).respiratoryRate;
+        const bg = cardColor(item.status);
         return (
-          <View style={styles.recordCard}>
-            <Text style={styles.recordDate}>{formatDate(item.recordedAt)}</Text>
+          <View style={[styles.recordCard, { backgroundColor: bg }]}>
+            <View style={styles.cardIconBleedSmall} pointerEvents="none">
+              <Activity color="rgba(255,255,255,0.16)" size={120} strokeWidth={1.4} />
+            </View>
+
+            <View style={styles.recordTopRow}>
+              <Text style={styles.recordDate}>{formatDate(item.recordedAt)}</Text>
+              {item.status && (
+                <View style={styles.recordStatusPill}>
+                  <Text style={styles.recordStatusPillText}>{item.status}</Text>
+                </View>
+              )}
+            </View>
+
             <View style={styles.vitalsRow}>
               <View style={styles.vital}>
                 <Text style={styles.vitalValue}>{item.heartRate}</Text>
@@ -108,7 +180,6 @@ export default function DashboardTab({ records, loading }: Props) {
                 <Text style={styles.vitalLabel}>RESP</Text>
               </View>
             </View>
-            {item.status && <Text style={styles.statusBadge}>{item.status}</Text>}
           </View>
         );
       }}
@@ -120,32 +191,60 @@ const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
 const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
 
-const styles = StyleSheet.create({
-  list: { paddingHorizontal: 20, paddingBottom: 120 },
-  summaryCard: {
-    backgroundColor: "#f2f2f2", borderRadius: 16, padding: 18, marginBottom: 18,
-  },
-  summaryTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  summaryTitle: { fontSize: 15, fontFamily: FONT_BOLD, fontWeight: "700", color: "#000000" },
-  classBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  classBadgeText: { fontSize: 11, fontFamily: FONT_DEMI, color: "#ffffff" },
-  monthLabels: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
-  monthLabel: { fontSize: 9, color: "#9a9a9a", width: CHART_WIDTH / 12, textAlign: "center" },
-  recentHeading: { fontSize: 13, fontFamily: FONT_DEMI, color: "#6b6b6b", marginTop: 18 },
-  empty: { paddingVertical: 40, alignItems: "center" },
-  emptyText: { fontSize: 15, fontFamily: FONT_DEMI, color: "#000000", marginBottom: 4 },
-  emptySub: { fontSize: 13, color: "#9a9a9a", textAlign: "center", paddingHorizontal: 20 },
-  recordCard: {
-    backgroundColor: "#f2f2f2", borderRadius: 14, padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: "#e0e0e0",
-  },
-  recordDate: { fontSize: 12, fontFamily: FONT_MEDIUM, color: "#6b6b6b", marginBottom: 8 },
-  vitalsRow: { flexDirection: "row", justifyContent: "space-between" },
-  vital: { alignItems: "center", flex: 1 },
-  vitalValue: { fontSize: 18, fontFamily: FONT_BOLD, fontWeight: "700", color: "#000000" },
-  vitalLabel: { fontSize: 10, color: "#9a9a9a", marginTop: 2 },
-  statusBadge: {
-    marginTop: 10, alignSelf: "flex-start", backgroundColor: "#000000", color: "#ffffff",
-    fontSize: 11, fontFamily: FONT_DEMI, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    list: { paddingHorizontal: 20, paddingBottom: 120 },
+
+    summaryCard: {
+      position: "relative", borderRadius: 22, overflow: "hidden", padding: 20, marginBottom: 18,
+    },
+    cardIconBleedLarge: { position: "absolute", right: -36, top: -30, transform: [{ rotate: "-12deg" }] },
+    cardIconBleedSmall: { position: "absolute", right: -26, top: -20, transform: [{ rotate: "-12deg" }] },
+
+    summaryTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+    summaryTitle: { fontSize: 15, fontFamily: FONT_BOLD, fontWeight: "700", color: "#ffffff" },
+    classBadge: {
+      paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+      backgroundColor: "rgba(255,255,255,0.22)",
+    },
+    classBadgeText: { fontSize: 11, fontFamily: FONT_DEMI, color: "#ffffff" },
+
+    chartRow: {
+      flexDirection: "row", alignItems: "flex-end", marginTop: 22, height: MAX_BAR_HEIGHT + 24,
+    },
+    chartColumn: { flex: 1, alignItems: "center" },
+    barTrack: {
+      width: 14, height: MAX_BAR_HEIGHT, borderRadius: 7,
+      backgroundColor: "rgba(255,255,255,0.14)", justifyContent: "flex-end", overflow: "hidden",
+    },
+    bar: { width: 14, borderRadius: 7 },
+    monthLabel: { fontSize: 10, color: "rgba(255,255,255,0.55)", marginTop: 8, fontFamily: FONT_MEDIUM },
+    monthLabelActive: { color: "#ffffff", fontFamily: FONT_BOLD, fontWeight: "700" },
+    selectedDetail: {
+      fontSize: 12, color: "rgba(255,255,255,0.85)", fontFamily: FONT_MEDIUM, marginTop: 14, textAlign: "center",
+    },
+
+    recentHeading: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.textMuted, marginBottom: 12 },
+
+    empty: { paddingVertical: 40, alignItems: "center" },
+    emptyText: { fontSize: 15, fontFamily: FONT_DEMI, color: colors.text, marginBottom: 4 },
+    emptySub: { fontSize: 13, color: colors.textFaint, textAlign: "center", paddingHorizontal: 20 },
+
+    recordCard: {
+      position: "relative", borderRadius: 20, overflow: "hidden", padding: 16, marginBottom: 12,
+    },
+    recordTopRow: {
+      flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14,
+    },
+    recordDate: { fontSize: 12, fontFamily: FONT_DEMI, color: "rgba(255,255,255,0.85)" },
+    recordStatusPill: {
+      backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3,
+    },
+    recordStatusPillText: { fontSize: 10, fontFamily: FONT_DEMI, color: "#ffffff" },
+
+    vitalsRow: { flexDirection: "row", justifyContent: "space-between" },
+    vital: { alignItems: "center", flex: 1 },
+    vitalValue: { fontSize: 18, fontFamily: FONT_BOLD, fontWeight: "700", color: "#ffffff" },
+    vitalLabel: { fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: 2, fontFamily: FONT_MEDIUM },
+  });
+}

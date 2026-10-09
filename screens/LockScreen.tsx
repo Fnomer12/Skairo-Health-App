@@ -8,12 +8,15 @@ import {
   Platform,
 } from "react-native";
 import * as LocalAuthentication from "expo-local-authentication";
+import { useTheme, ThemeColors } from "../context/ThemeContext";
 
 type Props = {
   onUnlock: () => void;
 };
 
 export default function LockScreen({ onUnlock }: Props) {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +58,7 @@ export default function LockScreen({ onUnlock }: Props) {
       <Text style={styles.subtitle}>Your records are locked</Text>
 
       {checking ? (
-        <ActivityIndicator size="large" style={{ marginTop: 24 }} />
+        <ActivityIndicator size="large" color={colors.text} style={{ marginTop: 24 }} />
       ) : (
         <>
           {error && <Text style={styles.error}>{error}</Text>}
@@ -68,44 +71,46 @@ export default function LockScreen({ onUnlock }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  title: {
-    color: "#000000",
-    fontSize: 32,
-    fontWeight: "700",
-    marginBottom: 8,
-    textAlign: "center",
-    fontFamily: Platform.OS === "ios" ? "AvenirNext-Bold" : undefined,
-  },
-  subtitle: {
-    color: "#6b6b6b",
-    fontSize: 16,
-    marginBottom: 32,
-    textAlign: "center",
-    fontFamily: Platform.OS === "ios" ? "AvenirNext-Medium" : undefined,
-  },
-  error: {
-    color: "#b00020",
-    fontSize: 14,
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#000000",
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 10,
-  },
-  buttonText: {
-    color: "#ffffff",
-    fontWeight: "600",
-    fontSize: 16,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+    },
+    title: {
+      color: colors.text,
+      fontSize: 32,
+      fontWeight: "700",
+      marginBottom: 8,
+      textAlign: "center",
+      fontFamily: Platform.OS === "ios" ? "AvenirNext-Bold" : undefined,
+    },
+    subtitle: {
+      color: colors.textMuted,
+      fontSize: 16,
+      marginBottom: 32,
+      textAlign: "center",
+      fontFamily: Platform.OS === "ios" ? "AvenirNext-Medium" : undefined,
+    },
+    error: {
+      color: colors.danger,
+      fontSize: 14,
+      marginBottom: 16,
+      textAlign: "center",
+    },
+    button: {
+      backgroundColor: colors.accent,
+      paddingVertical: 14,
+      paddingHorizontal: 32,
+      borderRadius: 10,
+    },
+    buttonText: {
+      color: colors.accentText,
+      fontWeight: "600",
+      fontSize: 16,
+    },
+  });
+}
