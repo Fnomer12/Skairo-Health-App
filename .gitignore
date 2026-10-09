@@ -42,3 +42,8 @@ yarn-error.*
 
 # local build logs
 *.log
+
+
+# Agents
+AGENTS.md
+.claude/
