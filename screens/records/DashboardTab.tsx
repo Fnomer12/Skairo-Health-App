@@ -3,11 +3,10 @@ import {
   View, Text, FlatList, StyleSheet, Platform, TouchableOpacity,
   NativeSyntheticEvent, NativeScrollEvent, Animated,
 } from "react-native";
-import { Activity } from "lucide-react-native";
+import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop } from "react-native-svg";
+import { Activity, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 import { Reading } from "../../db/records";
 import { useTheme, ThemeColors } from "../../context/ThemeContext";
-
-type DashboardReading = Reading & { respiratoryRate?: number };
 
 type Props = {
   records: Reading[];
@@ -15,13 +14,46 @@ type Props = {
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
 };
 
-const MONTH_LABELS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-const MAX_BAR_HEIGHT = 72;
+type VitalKey = "heartRate" | "temperature" | "spo2" | "respiratoryRate";
+
 const RECENT_LIMIT = 10;
+const CHART_POINTS = 14; // how many of the most recent readings feed the trend line
+
+const VITAL_CONFIG: Record<VitalKey, { shortLabel: string; fullLabel: string; unit: string; decimals: number }> = {
+  heartRate: { shortLabel: "HR", fullLabel: "Heart Rate", unit: "BPM", decimals: 0 },
+  temperature: { shortLabel: "Temp", fullLabel: "Temperature", unit: "°", decimals: 1 },
+  spo2: { shortLabel: "SpO2", fullLabel: "SpO2", unit: "%", decimals: 0 },
+  respiratoryRate: { shortLabel: "Resp", fullLabel: "Respiratory Rate", unit: "brpm", decimals: 0 },
+};
+const VITAL_ORDER: VitalKey[] = ["heartRate", "temperature", "spo2", "respiratoryRate"];
+
+// Chart drawing is done in a fixed logical coordinate space and stretched
+// to fill the card's width via the SVG viewBox -- no onLayout measuring needed.
+const CHART_W = 300;
+const CHART_H = 120;
+const CHART_PAD_X = 6;
+const CHART_PAD_TOP = 16;
+const CHART_PAD_BOTTOM = 10;
+
+function getVitalValue(r: Reading, key: VitalKey): number | null {
+  const v = r[key];
+  return typeof v === "number" ? v : null;
+}
+
+function formatVitalValue(value: number, key: VitalKey): string {
+  const { unit, decimals } = VITAL_CONFIG[key];
+  return `${value.toFixed(decimals)}${unit === "%" || unit === "°" ? unit : ""}`;
+}
+
+function vitalUnitSuffix(key: VitalKey): string {
+  const { unit } = VITAL_CONFIG[key];
+  return unit === "%" || unit === "°" ? "" : ` ${unit}`;
+}
+
+function formatShortDate(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -50,28 +82,82 @@ function statusLabel(status: string | null): string {
   return "Normal range";
 }
 
+// Builds a smooth-ish SVG path through a series of points using the
+// "midpoint quadratic" trick: curve toward the midpoint of each segment
+// using the previous point as the control point. No extra charting
+// library needed, and it reads as a gentle curve rather than sharp zigzags.
+function buildSmoothPath(points: Array<{ x: number; y: number }>): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const midX = (prev.x + curr.x) / 2;
+    const midY = (prev.y + curr.y) / 2;
+    d += ` Q ${prev.x} ${prev.y} ${midX} ${midY}`;
+  }
+  const last = points[points.length - 1];
+  d += ` L ${last.x} ${last.y}`;
+  return d;
+}
+
 export default function DashboardTab({ records, loading, onScroll }: Props) {
   const { colors } = useTheme();
   const styles = createStyles(colors);
 
-  const now = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedVital, setSelectedVital] = useState<VitalKey>("heartRate");
 
-  const monthlyCounts = useMemo(() => {
-    const counts = new Array(12).fill(0);
-    const thisYear = now.getFullYear();
-    records.forEach((r) => {
-      const d = new Date(r.recordedAt);
-      if (d.getFullYear() === thisYear) counts[d.getMonth()] += 1;
-    });
-    return counts;
-  }, [records]);
-
-  const maxCount = Math.max(1, ...monthlyCounts);
   const classification = classify(records, loading);
   const recentRecords = useMemo(() => records.slice(0, RECENT_LIMIT), [records]);
-  const selectedCount = monthlyCounts[selectedMonth];
-  const isCurrentMonth = selectedMonth === now.getMonth();
+
+  // Chronological (oldest -> newest) series of the selected vital, built
+  // from the most recent CHART_POINTS readings, skipping any where that
+  // particular vital wasn't captured.
+  const chartSeries = useMemo(() => {
+    return records
+      .slice(0, CHART_POINTS)
+      .reverse()
+      .map((r) => ({ date: r.recordedAt, value: getVitalValue(r, selectedVital) }))
+      .filter((p): p is { date: string; value: number } => p.value != null);
+  }, [records, selectedVital]);
+
+  const geometry = useMemo(() => {
+    if (chartSeries.length === 0) return null;
+    const values = chartSeries.map((p) => p.value);
+    const rawMin = Math.min(...values);
+    const rawMax = Math.max(...values);
+    const range = rawMax - rawMin || Math.max(rawMax * 0.1, 1);
+    const paddedMin = rawMin - range * 0.18;
+    const paddedMax = rawMax + range * 0.18;
+    const innerH = CHART_H - CHART_PAD_TOP - CHART_PAD_BOTTOM;
+    const innerW = CHART_W - CHART_PAD_X * 2;
+
+    const points = chartSeries.map((p, i) => {
+      const x = chartSeries.length > 1 ? CHART_PAD_X + (i / (chartSeries.length - 1)) * innerW : CHART_W / 2;
+      const y = CHART_PAD_TOP + (1 - (p.value - paddedMin) / (paddedMax - paddedMin)) * innerH;
+      return { x, y, value: p.value, date: p.date };
+    });
+
+    const linePath = buildSmoothPath(points);
+    const floorY = CHART_H - CHART_PAD_BOTTOM;
+    const areaPath =
+      points.length > 1
+        ? `${linePath} L ${points[points.length - 1].x} ${floorY} L ${points[0].x} ${floorY} Z`
+        : "";
+
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    return { points, linePath, areaPath, rawMin, rawMax, avg };
+  }, [chartSeries]);
+
+  const latestValue = chartSeries.length ? chartSeries[chartSeries.length - 1].value : null;
+  const previousValue = chartSeries.length > 1 ? chartSeries[chartSeries.length - 2].value : null;
+  const delta = latestValue != null && previousValue != null ? latestValue - previousValue : null;
+  const epsilon = selectedVital === "temperature" ? 0.1 : 0.5;
+  const trendDirection: "up" | "down" | "flat" | null =
+    delta == null ? null : delta > epsilon ? "up" : delta < -epsilon ? "down" : "flat";
+  const vitalConfig = VITAL_CONFIG[selectedVital];
+  const TrendIcon = trendDirection === "up" ? TrendingUp : trendDirection === "down" ? TrendingDown : Minus;
 
   return (
     <Animated.FlatList
@@ -88,49 +174,116 @@ export default function DashboardTab({ records, loading, onScroll }: Props) {
             </View>
 
             <View style={styles.summaryTopRow}>
-              <Text style={styles.summaryTitle}>This year</Text>
+              <Text style={styles.summaryTitle}>Trends</Text>
               <View style={styles.classBadge}>
                 <Text style={styles.classBadgeText}>{classification.label}</Text>
               </View>
             </View>
 
-            <View style={styles.chartRow}>
-              {monthlyCounts.map((count, i) => {
-                const hasData = count > 0;
-                const isSelected = i === selectedMonth;
-                const barHeight = hasData
-                  ? Math.max((count / maxCount) * MAX_BAR_HEIGHT, 8)
-                  : 4;
+            <View style={styles.vitalPickerRow}>
+              {VITAL_ORDER.map((key) => {
+                const active = key === selectedVital;
                 return (
                   <TouchableOpacity
-                    key={i}
-                    style={styles.chartColumn}
-                    activeOpacity={0.6}
-                    onPress={() => setSelectedMonth(i)}
-                    hitSlop={{ top: 8, bottom: 8 }}
+                    key={key}
+                    style={[styles.vitalPill, active && styles.vitalPillActive]}
+                    activeOpacity={0.75}
+                    onPress={() => setSelectedVital(key)}
                   >
-                    <View style={styles.barTrack}>
-                      <View
-                        style={[
-                          styles.bar,
-                          {
-                            height: barHeight,
-                            backgroundColor: isSelected ? "#ffffff" : hasData ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.16)",
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={[styles.monthLabel, isSelected && styles.monthLabelActive]}>
-                      {MONTH_LABELS[i]}
+                    <Text style={[styles.vitalPillText, active && styles.vitalPillTextActive]}>
+                      {VITAL_CONFIG[key].shortLabel}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
 
-            <Text style={styles.selectedDetail}>
-              {MONTH_NAMES[selectedMonth]}{isCurrentMonth ? " (this month)" : ""} · {selectedCount} reading{selectedCount === 1 ? "" : "s"}
-            </Text>
+            {latestValue != null ? (
+              <View style={styles.currentValueRow}>
+                <Text style={styles.currentValueNumber}>
+                  {latestValue.toFixed(vitalConfig.decimals)}
+                  <Text style={styles.currentValueUnit}>{vitalUnitSuffix(selectedVital) || ` ${vitalConfig.unit}`}</Text>
+                </Text>
+                {trendDirection && delta != null && (
+                  <View style={styles.trendChip}>
+                    <TrendIcon color="#ffffff" size={12} strokeWidth={2.5} />
+                    {trendDirection !== "flat" && (
+                      <Text style={styles.trendChipText}>
+                        {Math.abs(delta).toFixed(vitalConfig.decimals)}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            ) : (
+              <Text style={styles.noVitalData}>No {vitalConfig.fullLabel.toLowerCase()} readings yet</Text>
+            )}
+
+            {geometry && chartSeries.length > 1 ? (
+              <>
+                <View style={styles.chartWrap}>
+                  <Svg width="100%" height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} preserveAspectRatio="none">
+                    <Defs>
+                      <LinearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor="#ffffff" stopOpacity={0.32} />
+                        <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
+                      </LinearGradient>
+                    </Defs>
+                    <Line
+                      x1={CHART_PAD_X} y1={CHART_PAD_TOP}
+                      x2={CHART_W - CHART_PAD_X} y2={CHART_PAD_TOP}
+                      stroke="rgba(255,255,255,0.14)" strokeWidth={1}
+                    />
+                    <Line
+                      x1={CHART_PAD_X} y1={CHART_H - CHART_PAD_BOTTOM}
+                      x2={CHART_W - CHART_PAD_X} y2={CHART_H - CHART_PAD_BOTTOM}
+                      stroke="rgba(255,255,255,0.14)" strokeWidth={1}
+                    />
+                    <Path d={geometry.areaPath} fill="url(#areaFill)" stroke="none" />
+                    <Path
+                      d={geometry.linePath}
+                      stroke="#ffffff" strokeWidth={2.5} fill="none"
+                      strokeLinecap="round" strokeLinejoin="round"
+                    />
+                    {geometry.points.map((pt, i) => {
+                      const isLast = i === geometry.points.length - 1;
+                      return (
+                        <Circle
+                          key={i}
+                          cx={pt.x} cy={pt.y}
+                          r={isLast ? 4.5 : 2.5}
+                          fill={isLast ? "#ffffff" : "rgba(255,255,255,0.6)"}
+                        />
+                      );
+                    })}
+                  </Svg>
+                </View>
+
+                <View style={styles.chartAxisRow}>
+                  <Text style={styles.chartAxisLabel}>{formatShortDate(chartSeries[0].date)}</Text>
+                  <Text style={styles.chartAxisLabel}>{formatShortDate(chartSeries[chartSeries.length - 1].date)}</Text>
+                </View>
+
+                <View style={styles.chartStatsRow}>
+                  <View style={styles.chartStatItem}>
+                    <Text style={styles.chartStatLabel}>Low</Text>
+                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.rawMin, selectedVital)}</Text>
+                  </View>
+                  <View style={styles.chartStatDivider} />
+                  <View style={styles.chartStatItem}>
+                    <Text style={styles.chartStatLabel}>Avg</Text>
+                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.avg, selectedVital)}</Text>
+                  </View>
+                  <View style={styles.chartStatDivider} />
+                  <View style={styles.chartStatItem}>
+                    <Text style={styles.chartStatLabel}>High</Text>
+                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.rawMax, selectedVital)}</Text>
+                  </View>
+                </View>
+              </>
+            ) : chartSeries.length === 1 ? (
+              <Text style={styles.chartHint}>Add another reading to start seeing a trend</Text>
+            ) : null}
           </View>
 
           <Text style={styles.recentHeading}>Recent takes</Text>
@@ -145,7 +298,7 @@ export default function DashboardTab({ records, loading, onScroll }: Props) {
         ) : null
       }
       renderItem={({ item }) => {
-        const rr = (item as DashboardReading).respiratoryRate;
+        const rr = item.respiratoryRate;
         const bg = cardColor(item.status);
         return (
           <View style={[styles.recordCard, { backgroundColor: bg }]}>
@@ -209,20 +362,39 @@ function createStyles(colors: ThemeColors) {
     },
     classBadgeText: { fontSize: 11, fontFamily: FONT_DEMI, color: "#ffffff" },
 
-    chartRow: {
-      flexDirection: "row", alignItems: "flex-end", marginTop: 22, height: MAX_BAR_HEIGHT + 24,
+    vitalPickerRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+    vitalPill: {
+      paddingHorizontal: 13, paddingVertical: 6, borderRadius: 14,
+      backgroundColor: "rgba(255,255,255,0.14)",
     },
-    chartColumn: { flex: 1, alignItems: "center" },
-    barTrack: {
-      width: 14, height: MAX_BAR_HEIGHT, borderRadius: 7,
-      backgroundColor: "rgba(255,255,255,0.14)", justifyContent: "flex-end", overflow: "hidden",
+    vitalPillActive: { backgroundColor: "#ffffff" },
+    vitalPillText: { fontSize: 12, fontFamily: FONT_DEMI, color: "rgba(255,255,255,0.75)" },
+    vitalPillTextActive: { color: "#1a1a1a" },
+
+    currentValueRow: { flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 16 },
+    currentValueNumber: { fontSize: 34, fontFamily: FONT_BOLD, fontWeight: "700", color: "#ffffff", lineHeight: 38 },
+    currentValueUnit: { fontSize: 14, fontFamily: FONT_DEMI, color: "rgba(255,255,255,0.8)" },
+    trendChip: {
+      flexDirection: "row", alignItems: "center", gap: 3,
+      backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 12,
+      paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6,
     },
-    bar: { width: 14, borderRadius: 7 },
-    monthLabel: { fontSize: 10, color: "rgba(255,255,255,0.55)", marginTop: 8, fontFamily: FONT_MEDIUM },
-    monthLabelActive: { color: "#ffffff", fontFamily: FONT_BOLD, fontWeight: "700" },
-    selectedDetail: {
-      fontSize: 12, color: "rgba(255,255,255,0.85)", fontFamily: FONT_MEDIUM, marginTop: 14, textAlign: "center",
+    trendChipText: { fontSize: 11, fontFamily: FONT_DEMI, color: "#ffffff" },
+    noVitalData: { fontSize: 13, fontFamily: FONT_MEDIUM, color: "rgba(255,255,255,0.7)", marginTop: 16 },
+
+    chartWrap: { marginTop: 14, height: 120 },
+    chartAxisRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
+    chartAxisLabel: { fontSize: 10, fontFamily: FONT_MEDIUM, color: "rgba(255,255,255,0.55)" },
+    chartHint: { fontSize: 12, fontFamily: FONT_MEDIUM, color: "rgba(255,255,255,0.65)", marginTop: 14 },
+
+    chartStatsRow: {
+      flexDirection: "row", alignItems: "center", justifyContent: "space-around",
+      marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.16)",
     },
+    chartStatItem: { alignItems: "center", flex: 1 },
+    chartStatDivider: { width: 1, height: 24, backgroundColor: "rgba(255,255,255,0.16)" },
+    chartStatLabel: { fontSize: 10, fontFamily: FONT_MEDIUM, color: "rgba(255,255,255,0.6)", marginBottom: 2 },
+    chartStatValue: { fontSize: 14, fontFamily: FONT_DEMI, color: "#ffffff" },
 
     recentHeading: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.textMuted, marginBottom: 12 },
 

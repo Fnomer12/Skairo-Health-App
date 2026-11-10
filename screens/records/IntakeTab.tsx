@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import MorphingModal, { MorphRect } from "../components/MorphingModal";
 import {
   View, Text, FlatList, StyleSheet, Platform, TouchableOpacity,
   Modal, ScrollView, Alert, NativeSyntheticEvent, NativeScrollEvent, Animated,
@@ -80,6 +81,10 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
   const [pendingYear, setPendingYear] = useState(now.getFullYear());
   const [activeFilter, setActiveFilter] = useState<{ month: number; year: number } | null>(null);
   const [activeDayKey, setActiveDayKey] = useState<string | null>(null);
+    const [dayModalOpen, setDayModalOpen] = useState(false);
+  const [morphOrigin, setMorphOrigin] = useState<MorphRect | null>(null);
+  const [morphColor, setMorphColor] = useState("#3a3a3a");
+  const cardRefs = useRef<Record<string, View | null>>({});
 
   const years = useMemo(
     () => Array.from({ length: 6 }, (_, i) => now.getFullYear() - i),
@@ -125,6 +130,31 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
         { text: "Delete", style: "destructive", onPress: () => onDeleteRecord(id) },
       ]
     );
+  }
+
+
+    // if every reading of the open day gets deleted, close the modal
+  useEffect(() => {
+    if (dayModalOpen && !activeDayGroup) {
+      setMorphOrigin(null);
+      setDayModalOpen(false);
+    }
+  }, [dayModalOpen, activeDayGroup]);
+
+  function openDay(group: DayGroup) {
+    const show = (rect: MorphRect | null) => {
+      setMorphOrigin(rect);
+      setMorphColor(cardColor(group.readings[0].status));
+      setActiveDayKey(group.key);
+      setDayModalOpen(true);
+    };
+    const node = cardRefs.current[group.key];
+    if (node) node.measureInWindow((x, y, width, height) => show({ x, y, width, height }));
+    else show(null);
+  }
+
+  function closeDay() {
+    setDayModalOpen(false);
   }
 
   if (records.length === 0) {
@@ -188,7 +218,11 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
           const isStack = extraCount > 0;
 
           return (
-            <View style={styles.dayStackWrap}>
+                        <View
+              ref={(el) => { cardRefs.current[item.key] = el; }}
+              collapsable={false}
+              style={[styles.dayStackWrap, activeDayKey === item.key && { opacity: 0 }]}
+            >
               {isStack && (
                 <View style={[styles.ghostSliver, styles.ghostSliverFar, { backgroundColor: bg }]} />
               )}
@@ -200,7 +234,7 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
                 style={[styles.intakeCard, { backgroundColor: bg }]}
                 activeOpacity={isStack ? 0.85 : 1}
                 disabled={!isStack}
-                onPress={() => setActiveDayKey(item.key)}
+                onPress={() => openDay(item)}
               >
                 <View style={styles.cardIconBleed} pointerEvents="none">
                   <Activity color="rgba(255,255,255,0.16)" size={150} strokeWidth={1.4} />
@@ -259,41 +293,57 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
         }}
       />
 
-      <Modal visible={filterVisible} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Filter by month</Text>
-            <View style={styles.pickerRow}>
-              <ScrollView style={[styles.pickerColumn, styles.pickerColumnWide]} showsVerticalScrollIndicator={false}>
-                {MONTHS.map((m, i) => (
-                  <TouchableOpacity key={m} style={styles.pickerItem} onPress={() => setPendingMonth(i)}>
-                    <Text style={[styles.pickerItemText, pendingMonth === i && styles.pickerItemTextActive]}>
-                      {m}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-              <ScrollView style={styles.pickerColumn} showsVerticalScrollIndicator={false}>
-                {years.map((y) => (
-                  <TouchableOpacity key={y} style={styles.pickerItem} onPress={() => setPendingYear(y)}>
-                    <Text style={[styles.pickerItemText, pendingYear === y && styles.pickerItemTextActive]}>
-                      {y}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={clearFilter}>
-                <Text style={styles.cancelText}>All time</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.saveButton]} onPress={applyFilter}>
-                <Text style={styles.saveText}>Apply</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+          <MorphingModal
+        open={dayModalOpen}
+        origin={morphOrigin}
+        onRequestClose={closeDay}
+        onClosed={() => setActiveDayKey(null)}
+        fromColor={morphColor}
+        toColor={colors.background}
+        fromRadius={22}
+        toRadius={18}
+        backdropColor={colors.modalBackdrop}
+        contentStyle={styles.dayModalContent}
+      >
+        <View style={styles.dayModalHeader}>
+          <Text style={styles.modalTitle}>
+            {activeDayGroup ? formatDayLabel(activeDayGroup.readings[0].recordedAt) : ""}
+          </Text>
+          <TouchableOpacity onPress={closeDay} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <X color={colors.text} size={18} />
+          </TouchableOpacity>
         </View>
-      </Modal>
+        <ScrollView style={styles.dayModalList} showsVerticalScrollIndicator={false}>
+          {activeDayGroup?.readings.map((r) => {
+            const rr = (r as IntakeReading).respiratoryRate;
+            const bg = cardColor(r.status);
+            const timeLabel = formatTime(r.recordedAt);
+            return (
+              <View key={r.id} style={[styles.dayModalRow, { backgroundColor: bg }]}>
+                <View style={styles.dayModalRowTop}>
+                  <Text style={styles.dayModalRowTime}>{timeLabel}</Text>
+                  <TouchableOpacity
+                    onPress={() => confirmDelete(r.id, `${formatDayLabel(r.recordedAt)} · ${timeLabel}`)}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    style={styles.deletePillSmall}
+                  >
+                    <Trash2 color="#ffffff" size={12} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.dayModalRowHeadline} numberOfLines={1}>
+                  {r.status || "Reading recorded"}
+                </Text>
+                <View style={styles.dayModalStatsRow}>
+                  <Text style={styles.dayModalStat}>{r.heartRate} bpm</Text>
+                  <Text style={styles.dayModalStat}>{r.temperature}°C</Text>
+                  <Text style={styles.dayModalStat}>{r.spo2}% SpO2</Text>
+                  <Text style={styles.dayModalStat}>{rr != null ? rr : "–"} rpm</Text>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </MorphingModal>
 
       <Modal
         visible={!!activeDayGroup}
@@ -302,7 +352,7 @@ export default function IntakeTab({ records, connected, onDeleteRecord, onScroll
         onRequestClose={() => setActiveDayKey(null)}
       >
         <View style={styles.modalBackdrop}>
-          <View style={styles.dayModalBox}>
+          <View style={styles.dayModalContent}>
             <View style={styles.dayModalHeader}>
               <Text style={styles.modalTitle}>
                 {activeDayGroup ? formatDayLabel(activeDayGroup.readings[0].recordedAt) : ""}
@@ -383,11 +433,7 @@ function createStyles(colors: ThemeColors) {
     },
     filterPillText: { fontSize: 12, fontFamily: FONT_DEMI, color: colors.text },
 
-    // Each day sits in its own stack wrapper. When a day has more than one
-    // reading, two flat "ghost" slivers peek out from behind the bottom
-    // edge of the main card — the Apple-Wallet stacked-card look — and the
-    // extra margin below gives them room without colliding with the next
-    // day's card.
+  
     dayStackWrap: { position: "relative", marginBottom: 22 },
     ghostSliver: {
       position: "absolute",
@@ -458,15 +504,11 @@ function createStyles(colors: ThemeColors) {
     saveButton: { backgroundColor: colors.accent },
     saveText: { fontFamily: FONT_DEMI, color: colors.accentText },
 
-    // Day-detail modal — opened by tapping a stacked day card, lists every
-    // reading from that day with its own delete action.
-    dayModalBox: {
-      width: "88%", maxHeight: "75%", backgroundColor: colors.background, borderRadius: 18, padding: 18,
-    },
+    dayModalContent: { padding: 18 },
     dayModalHeader: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
     },
-    dayModalList: { maxHeight: "100%" },
+    dayModalList: { flexGrow: 0, flexShrink: 1 },
     dayModalRow: { borderRadius: 16, padding: 14, marginBottom: 10 },
     dayModalRowTop: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8,

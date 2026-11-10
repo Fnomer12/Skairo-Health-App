@@ -71,3 +71,16 @@ export async function deleteRecord(id: number): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM records WHERE id = ?", [id]);
 }
+
+// Used only by Drive restore — reinserts a reading with its original
+// recordedAt timestamp, instead of stamping "now" like addRecord does.
+export async function restoreRecord(
+  profileId: number,
+  r: Pick<Reading, "heartRate" | "temperature" | "spo2" | "status" | "recordedAt" | "respiratoryRate">
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    "INSERT INTO records (profileId, heartRate, temperature, spo2, status, recordedAt, respiratoryRate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [profileId, r.heartRate, r.temperature, r.spo2, r.status, r.recordedAt, r.respiratoryRate]
+  );
+}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, Platform, TouchableOpacity,
   Modal, TextInput, Alert, ActivityIndicator, Image, ScrollView,
@@ -8,6 +8,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Plus, Cloud, Mars, Venus } from "lucide-react-native";
 import { Profile, Gender, initDatabase, getProfiles, addProfile, fullName } from "../db/profiles";
 import { useTheme, ThemeColors } from "../context/ThemeContext";
+import {
+  backupToDrive,
+  restoreFromDrive,
+  debugListDriveAppData,
+  debugFetchDriveBackupContent,
+  getConnectedAccountEmail,
+  getSavedPassphrase,
+  savePassphrase,
+  isErrorWithCode,
+  statusCodes,
+} from "../lib/googleDrive";
 
 type Props = {
   onSelectProfile: (profile: Profile) => void;
@@ -121,11 +132,18 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
   const [dateOfBirth, setDateOfBirth] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
   const [saving, setSaving] = useState(false);
+  const [drivePending, setDrivePending] = useState(false);
+  const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
 
   const [dobPickerVisible, setDobPickerVisible] = useState(false);
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR - 25);
   const [selectedMonth, setSelectedMonth] = useState(1);
   const [selectedDay, setSelectedDay] = useState(1);
+
+  const [passphraseVisible, setPassphraseVisible] = useState(false);
+  const [passphraseInput, setPassphraseInput] = useState("");
+  const [passphrasePurpose, setPassphrasePurpose] = useState<"backup" | "restore">("backup");
+  const passphraseResolver = useRef<((value: string | null) => void) | null>(null);
 
   const atCapacity = profiles.length >= MAX_PROFILES;
   const avatarSize = getAvatarSize(profiles.length || 1);
@@ -149,9 +167,15 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
     }
   }, []);
 
+  const refreshConnectedAccount = useCallback(async () => {
+    const email = await getConnectedAccountEmail();
+    setConnectedEmail(email);
+  }, []);
+
   useEffect(() => {
     loadProfiles();
-  }, [loadProfiles]);
+    refreshConnectedAccount();
+  }, [loadProfiles, refreshConnectedAccount]);
 
   function openAdd() {
     if (atCapacity) {
@@ -187,8 +211,92 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
     }
   }
 
-  function handleConnectDrive() {
-    Alert.alert("Connect Google Drive", "Google Sign-In isn't wired up yet — see the setup steps.");
+  function promptForPassphrase(purpose: "backup" | "restore"): Promise<string | null> {
+    setPassphrasePurpose(purpose);
+    setPassphraseInput("");
+    setPassphraseVisible(true);
+    return new Promise((resolve) => {
+      passphraseResolver.current = resolve;
+    });
+  }
+
+  function submitPassphrase() {
+    setPassphraseVisible(false);
+    passphraseResolver.current?.(passphraseInput.trim() || null);
+    passphraseResolver.current = null;
+  }
+
+  function cancelPassphrase() {
+    setPassphraseVisible(false);
+    passphraseResolver.current?.(null);
+    passphraseResolver.current = null;
+  }
+
+  async function handleConnectDrive() {
+    if (drivePending) return;
+    setDrivePending(true);
+    try {
+      let passphrase = await getSavedPassphrase();
+
+      if (profiles.length === 0) {
+        if (!passphrase) {
+          passphrase = await promptForPassphrase("restore");
+          if (!passphrase) return;
+        }
+        const result = await restoreFromDrive(passphrase);
+        if (result.status === "no-backup") {
+          Alert.alert("No backup found", "We checked your Google Drive but didn't find a Skairo Health backup yet.");
+        } else if (result.status === "already-has-data") {
+          Alert.alert("Already have profiles", "Restore is only offered on an empty device, to avoid creating duplicates.");
+        } else {
+          await savePassphrase(passphrase);
+          await loadProfiles();
+          Alert.alert("Restored", `Brought back ${result.restoredProfiles} profile(s) and ${result.restoredRecords} reading(s) from Drive.`);
+        }
+      } else {
+        if (!passphrase) {
+          passphrase = await promptForPassphrase("backup");
+          if (!passphrase) return;
+        }
+        const result = await backupToDrive(passphrase);
+        await savePassphrase(passphrase);
+        Alert.alert("Backed up", `Saved ${result.profileCount} profile(s) and ${result.recordCount} reading(s) to your Google Drive, encrypted.`);
+      }
+      // The account may have just been signed into for the first time, or
+      // switched — refresh the label so it's never stale.
+      await refreshConnectedAccount();
+    } catch (e) {
+      if (isErrorWithCode(e) && e.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user backed out of the Google sign-in sheet — nothing to show
+      } else {
+        Alert.alert("Google Drive error", (e as Error).message);
+      }
+    } finally {
+      setDrivePending(false);
+    }
+  }
+
+  async function handleDebugCheckDrive() {
+    try {
+      const [result, email] = await Promise.all([debugListDriveAppData(), getConnectedAccountEmail()]);
+      const accountLine = `Connected account: ${email ?? "none signed in"}\n\n`;
+      Alert.alert("Drive App Data (debug)", accountLine + result, [
+        { text: "Close", style: "cancel" },
+        { text: "View Contents", onPress: handleViewBackupContent },
+      ]);
+    } catch (e) {
+      Alert.alert("Drive check failed", (e as Error).message);
+    }
+  }
+
+  async function handleViewBackupContent() {
+    try {
+      const passphrase = await getSavedPassphrase();
+      const content = await debugFetchDriveBackupContent(passphrase ?? undefined);
+      Alert.alert("Backup File Contents", content);
+    } catch (e) {
+      Alert.alert("Couldn't read backup content", (e as Error).message);
+    }
   }
 
   function openDobPicker() {
@@ -223,10 +331,23 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
           <Text style={styles.title}>Profiles</Text>
           <Text style={styles.countText}>{profiles.length}/{MAX_PROFILES} users</Text>
         </View>
-        <TouchableOpacity style={styles.cloudButton} onPress={handleConnectDrive}>
-          <Cloud color={colors.text} size={18} />
+        <TouchableOpacity
+          style={styles.cloudButton}
+          onPress={handleConnectDrive}
+          onLongPress={handleDebugCheckDrive}
+          disabled={drivePending}
+        >
+          {drivePending ? (
+            <ActivityIndicator size="small" color={colors.text} />
+          ) : (
+            <Cloud color={colors.text} size={18} />
+          )}
         </TouchableOpacity>
       </View>
+
+      <Text style={styles.driveAccountText}>
+        {connectedEmail ? `Google Drive: ${connectedEmail}` : "Google Drive: not connected"}
+      </Text>
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={colors.text} />
@@ -419,6 +540,44 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={passphraseVisible} transparent animationType="fade">
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>
+                {passphrasePurpose === "backup" ? "Set a backup passphrase" : "Enter your backup passphrase"}
+              </Text>
+              <Text style={styles.passphraseHint}>
+                {passphrasePurpose === "backup"
+                  ? "Your vitals are encrypted before upload. Remember this — you'll need it to restore on another device."
+                  : "Enter the passphrase you used when this backup was created."}
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Passphrase"
+                placeholderTextColor={colors.textFaint}
+                value={passphraseInput}
+                onChangeText={setPassphraseInput}
+                secureTextEntry
+                autoFocus
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={cancelPassphrase}>
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={submitPassphrase}
+                  disabled={passphraseInput.trim().length < 4}
+                >
+                  <Text style={styles.saveText}>Continue</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }
@@ -449,6 +608,13 @@ function createStyles(colors: ThemeColors) {
       width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceAlt,
       alignItems: "center", justifyContent: "center",
       borderWidth: 1, borderColor: colors.border,
+    },
+    driveAccountText: {
+      fontSize: 11,
+      fontFamily: FONT_MEDIUM,
+      color: colors.textFaint,
+      textAlign: "center",
+      marginBottom: 14,
     },
 
     scrollContent: {
@@ -550,5 +716,12 @@ function createStyles(colors: ThemeColors) {
     cancelText: { fontFamily: FONT_DEMI, color: colors.text },
     saveButton: { backgroundColor: colors.accent },
     saveText: { fontFamily: FONT_DEMI, color: colors.accentText },
+    passphraseHint: {
+      fontSize: 12,
+      fontFamily: FONT_MEDIUM,
+      color: colors.textMuted,
+      marginBottom: 12,
+      lineHeight: 17,
+    },
   });
 }

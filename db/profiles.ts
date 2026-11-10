@@ -143,3 +143,16 @@ export function calculateAge(dateOfBirth: string): number {
   if (!birthdayPassedThisYear) age -= 1;
   return age;
 }
+
+// Used only by Drive restore — recreates a profile from a backup, keeping its
+// original publicId/createdAt instead of generating new ones.
+export async function restoreProfileRecord(
+  p: Pick<Profile, "firstName" | "lastName" | "createdAt" | "allergies" | "publicId" | "dateOfBirth" | "gender">
+): Promise<number> {
+  const db = await getDb();
+  const result = await db.runAsync(
+    "INSERT INTO profiles (firstName, lastName, createdAt, allergies, photoUri, publicId, dateOfBirth, gender) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [p.firstName, p.lastName, p.createdAt, p.allergies, null, p.publicId, p.dateOfBirth, p.gender]
+  );
+  return result.lastInsertRowId as number;
+}

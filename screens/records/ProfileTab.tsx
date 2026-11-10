@@ -13,6 +13,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Profile, Gender, updateProfile, deleteProfile, calculateAge } from "../../db/profiles";
 import { useTheme, ThemeColors } from "../../context/ThemeContext";
 import { ThemeMode } from "../../db/settings";
+import appConfig from "../../app.json";
 
 type Props = {
   profile: Profile;
@@ -28,6 +29,11 @@ const MONTHS = [
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 120 }, (_, i) => CURRENT_YEAR - i);
+
+// Read straight from app.json at build time -- no extra dependency (no
+// expo-constants, no native rebuild needed), and it stays correct
+// automatically whenever app.json's version bumps.
+const APP_VERSION: string = appConfig?.expo?.version ?? "1.0.0";
 
 function formatDob(dateOfBirth: string): string {
   const [year, month, day] = dateOfBirth.split("-").map(Number);
@@ -95,6 +101,7 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
 
   const initials = `${profile.firstName?.[0] ?? ""}${profile.lastName?.[0] ?? ""}`.toUpperCase();
   const age = profile.dateOfBirth ? calculateAge(profile.dateOfBirth) : null;
+  const hasAllergies = !!profile.allergies && profile.allergies.trim().length > 0;
 
   function openEdit() {
     setFirstName(profile.firstName);
@@ -264,14 +271,16 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
           <Activity color={colors.onAccentFaint} size={130} strokeWidth={1.3} style={styles.heroPulseRight} />
 
           <TouchableOpacity style={styles.avatarWrapper} onPress={handleAvatarPress} disabled={photoBusy}>
-            <View style={styles.avatarCircle}>
-              {photoBusy ? (
-                <ActivityIndicator color={colors.accent} />
-              ) : profile.photoUri ? (
-                <Image source={{ uri: profile.photoUri }} style={styles.avatarImage} />
-              ) : (
-                <Text style={styles.avatarText}>{initials}</Text>
-              )}
+            <View style={styles.avatarRing}>
+              <View style={styles.avatarCircle}>
+                {photoBusy ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : profile.photoUri ? (
+                  <Image source={{ uri: profile.photoUri }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={styles.avatarText}>{initials}</Text>
+                )}
+              </View>
             </View>
             <View style={styles.cameraBadge}>
               <Camera color={colors.accentText} size={12} strokeWidth={2.4} />
@@ -293,6 +302,7 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.sectionLabel}>Profile</Text>
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.infoIconWrap}>
@@ -310,7 +320,7 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
             <Text style={styles.infoRowValue}>{profile.gender ?? "Not set"}</Text>
           </View>
           <View style={styles.infoDivider} />
-          <TouchableOpacity style={styles.infoRow} onPress={openDobPicker}>
+          <TouchableOpacity style={styles.infoRow} onPress={openDobPicker} activeOpacity={0.6}>
             <View style={styles.infoIconWrap}>
               <Calendar color={colors.accentText} size={15} />
             </View>
@@ -326,24 +336,31 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
           </TouchableOpacity>
         </View>
 
-        <View style={styles.allergyCard}>
+        <Text style={styles.sectionLabel}>Medical</Text>
+        <View style={[styles.allergyCard, hasAllergies && styles.allergyCardActive]}>
           <View style={styles.allergyHeader}>
-            <View style={styles.infoIconWrap}>
-              <AlertTriangle color={colors.accentText} size={15} />
+            <View style={[styles.infoIconWrap, hasAllergies && styles.infoIconWrapDanger]}>
+              <AlertTriangle color={hasAllergies ? colors.danger : colors.accentText} size={15} />
             </View>
             <Text style={styles.allergyLabel}>Allergies</Text>
+            {hasAllergies && (
+              <View style={styles.allergyBadge}>
+                <Text style={styles.allergyBadgeText}>Important</Text>
+              </View>
+            )}
           </View>
-          <Text style={styles.allergyValue}>
-            {profile.allergies && profile.allergies.length > 0 ? profile.allergies : "None specified"}
+          <Text style={[styles.allergyValue, hasAllergies && styles.allergyValueActive]}>
+            {hasAllergies ? profile.allergies : "None specified"}
           </Text>
         </View>
 
+        <Text style={styles.sectionLabel}>Appearance</Text>
         <View style={styles.appearanceCard}>
           <View style={styles.allergyHeader}>
             <View style={styles.infoIconWrap}>
               <Sun color={colors.accentText} size={15} />
             </View>
-            <Text style={styles.allergyLabel}>Appearance</Text>
+            <Text style={styles.allergyLabel}>Theme</Text>
           </View>
           <View style={styles.previewRow}>
             {THEME_OPTIONS.map(({ key, label }) => {
@@ -370,6 +387,11 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
               );
             })}
           </View>
+        </View>
+
+        <View style={styles.appFooter}>
+          <Text style={styles.appFooterName}>Skairo Health</Text>
+          <Text style={styles.appFooterVersion}>Version {APP_VERSION}</Text>
         </View>
       </ScrollView>
 
@@ -505,6 +527,30 @@ const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
 const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
 
+// Subtle, cross-platform elevation so cards read as raised panels
+// rather than flat outlined boxes.
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.07,
+    shadowRadius: 10,
+  },
+  android: { elevation: 2 },
+  default: {},
+});
+
+const heroShadow = Platform.select({
+  ios: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+  },
+  android: { elevation: 5 },
+  default: {},
+});
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -513,45 +559,59 @@ function createStyles(colors: ThemeColors) {
 
     heroCard: {
       position: "relative", width: "100%", backgroundColor: colors.accent,
-      borderRadius: 28, overflow: "hidden", paddingVertical: 28, paddingHorizontal: 20,
-      alignItems: "center", marginBottom: 16,
+      borderRadius: 28, overflow: "hidden", paddingVertical: 30, paddingHorizontal: 20,
+      alignItems: "center", marginBottom: 20,
+      ...heroShadow,
     },
     heroPulseLeft: { position: "absolute", left: -36, top: "50%", marginTop: -65, transform: [{ rotate: "8deg" }] },
     heroPulseRight: { position: "absolute", right: -36, top: "50%", marginTop: -65, transform: [{ rotate: "-8deg" }] },
 
     avatarWrapper: { marginBottom: 14 },
+    avatarRing: {
+      width: 100, height: 100, borderRadius: 50,
+      alignItems: "center", justifyContent: "center",
+      borderWidth: 1.5, borderColor: colors.onAccentOverlayBorder,
+    },
     avatarCircle: {
-      width: 92, height: 92, borderRadius: 46, backgroundColor: colors.accentText,
+      width: 88, height: 88, borderRadius: 44, backgroundColor: colors.accentText,
       alignItems: "center", justifyContent: "center", overflow: "hidden",
     },
-    avatarImage: { width: 92, height: 92, borderRadius: 46 },
-    avatarText: { color: colors.accent, fontSize: 28, fontFamily: FONT_BOLD, fontWeight: "700" },
+    avatarImage: { width: 88, height: 88, borderRadius: 44 },
+    avatarText: { color: colors.accent, fontSize: 27, fontFamily: FONT_BOLD, fontWeight: "700" },
     cameraBadge: {
-      position: "absolute", right: -2, bottom: -2, width: 26, height: 26, borderRadius: 13,
+      position: "absolute", right: 0, bottom: -2, width: 27, height: 27, borderRadius: 14,
       backgroundColor: colors.accent, alignItems: "center", justifyContent: "center",
-      borderWidth: 2, borderColor: colors.accentText,
+      borderWidth: 2.5, borderColor: colors.accentText,
     },
-    name: { fontSize: 19, fontFamily: FONT_BOLD, fontWeight: "700", color: colors.accentText },
-    heroSub: { fontSize: 12, fontFamily: FONT_MEDIUM, color: colors.onAccentMuted, marginTop: 4, marginBottom: 16 },
+    name: { fontSize: 20, fontFamily: FONT_BOLD, fontWeight: "700", color: colors.accentText, letterSpacing: 0.2 },
+    heroSub: { fontSize: 12.5, fontFamily: FONT_MEDIUM, color: colors.onAccentMuted, marginTop: 5, marginBottom: 18 },
     editButton: {
       flexDirection: "row", alignItems: "center", gap: 6,
-      paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20,
+      paddingHorizontal: 18, paddingVertical: 9, borderRadius: 20,
       backgroundColor: colors.onAccentOverlay, borderWidth: 1, borderColor: colors.onAccentOverlayBorder,
     },
     editButtonText: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.accentText },
 
+    sectionLabel: {
+      width: "100%", fontSize: 12, fontFamily: FONT_DEMI, color: colors.textFaint,
+      textTransform: "uppercase", letterSpacing: 0.6,
+      marginBottom: 8, paddingLeft: 4,
+    },
+
     infoCard: {
       width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      marginBottom: 14, overflow: "hidden",
+      marginBottom: 20, overflow: "hidden",
+      ...cardShadow,
     },
     infoRow: {
       flexDirection: "row", alignItems: "center", gap: 12,
-      paddingVertical: 13, paddingHorizontal: 14,
+      paddingVertical: 14, paddingHorizontal: 14,
     },
     infoIconWrap: {
       width: 30, height: 30, borderRadius: 10, backgroundColor: colors.accent,
       alignItems: "center", justifyContent: "center",
     },
+    infoIconWrapDanger: { backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: colors.dangerBorder },
     infoDivider: { height: 1, backgroundColor: colors.border, marginLeft: 56 },
     infoRowLabel: { flex: 1, fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted },
     infoRowValue: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.text },
@@ -560,15 +620,23 @@ function createStyles(colors: ThemeColors) {
 
     allergyCard: {
       width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      padding: 14, marginBottom: 12,
+      padding: 14, marginBottom: 20,
+      ...cardShadow,
     },
+    allergyCardActive: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
     allergyHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
-    allergyLabel: { fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted },
+    allergyLabel: { flex: 1, fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted },
+    allergyBadge: {
+      paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10, backgroundColor: colors.danger,
+    },
+    allergyBadgeText: { fontSize: 10, fontFamily: FONT_DEMI, color: colors.accentText, letterSpacing: 0.3 },
     allergyValue: { fontSize: 14, fontFamily: FONT_MEDIUM, color: colors.text, paddingLeft: 42 },
+    allergyValueActive: { color: colors.danger, fontFamily: FONT_DEMI },
 
     appearanceCard: {
       width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      padding: 14, marginBottom: 12,
+      padding: 14, marginBottom: 4,
+      ...cardShadow,
     },
     previewRow: { flexDirection: "row", gap: 10, paddingLeft: 42 },
     previewTile: { flex: 1, alignItems: "center" },
@@ -596,6 +664,10 @@ function createStyles(colors: ThemeColors) {
     },
     previewLabel: { fontSize: 11, fontFamily: FONT_MEDIUM, color: colors.textMuted, marginTop: 8 },
     previewLabelActive: { color: colors.text, fontFamily: FONT_DEMI },
+
+    appFooter: { alignItems: "center", marginTop: 26, marginBottom: 4 },
+    appFooterName: { fontSize: 12.5, fontFamily: FONT_DEMI, color: colors.textMuted },
+    appFooterVersion: { fontSize: 11.5, fontFamily: FONT_MEDIUM, color: colors.textFaint, marginTop: 3 },
 
     footer: {
       paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120,

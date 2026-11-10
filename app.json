@@ -45,7 +45,15 @@
         {
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.836365103129-4g6i0pqm2g23k8pe0s7qu20rfivbpgl3"
+        }
+      ],
+      "expo-font",
+      "expo-secure-store"
     ]
   }
 }

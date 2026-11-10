@@ -12,6 +12,7 @@ import { useTheme, ThemeColors } from "../context/ThemeContext";
 import DashboardTab from "./records/DashboardTab";
 import IntakeTab from "./records/IntakeTab";
 import ProfileTab from "./records/ProfileTab";
+import LiquidTabBar, { LiquidTabItem } from "./components/LiquidTabBar";
 
 type Props = {
   profile: Profile;
@@ -28,10 +29,10 @@ const TAB_LABELS: Record<TabKey, string> = {
   profile: "Profile",
 };
 
-const TAB_ITEMS: Array<{ key: TabKey; Icon: typeof LayoutGrid }> = [
-  { key: "dashboard", Icon: LayoutGrid },
-  { key: "intake", Icon: Activity },
-  { key: "profile", Icon: UserRound },
+const TAB_ITEMS: Array<LiquidTabItem & { key: TabKey }> = [
+  { key: "dashboard", label: "Dashboard", Icon: LayoutGrid, fx: "pop" },
+  { key: "intake", label: "Intake", Icon: Activity, fx: "heartbeat" },
+  { key: "profile", label: "Profile", Icon: UserRound, fx: "wave" },
 ];
 
 export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpdated }: Props) {
@@ -39,7 +40,7 @@ export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpd
   const styles = createStyles(colors);
 
   const { connectedDevice, takeReading } = useBle();
-  
+
   const scrollY = useRef(new Animated.Value(0)).current;
   const handleContentScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -64,36 +65,10 @@ export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpd
   const [takingReading, setTakingReading] = useState(false);
 
   const activeIndex = TAB_ITEMS.findIndex((t) => t.key === activeTab);
-  const [barWidth, setBarWidth] = useState(0);
-  const indicatorAnim = useRef(new Animated.Value(activeIndex)).current;
-  const squishAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.spring(indicatorAnim, {
-      toValue: activeIndex,
-      useNativeDriver: true,
-      friction: 7,
-      tension: 60,
-    }).start();
-
-    squishAnim.setValue(0.82);
-    Animated.spring(squishAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 5,
-      tension: 140,
-    }).start();
-  }, [activeIndex]);
 
   useEffect(() => {
     scrollY.setValue(0);
   }, [activeTab]);
-
-  const indicatorWidth = barWidth > 0 ? barWidth / TAB_ITEMS.length : 0;
-  const indicatorTranslateX = indicatorAnim.interpolate({
-    inputRange: TAB_ITEMS.map((_, i) => i),
-    outputRange: TAB_ITEMS.map((_, i) => i * indicatorWidth),
-  });
 
   const loadRecords = useCallback(async () => {
     try {
@@ -239,42 +214,12 @@ export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpd
         )}
       </View>
 
-      <View style={styles.tabBarWrapper} pointerEvents="box-none">
-        <BlurView intensity={55} tint="dark" style={styles.tabBar}>
-          <View style={styles.tabBarInner} onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}>
-            {barWidth > 0 && (
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.liquidIndicator,
-                  {
-                    width: indicatorWidth,
-                    transform: [
-                      { translateX: indicatorTranslateX },
-                      { scaleX: squishAnim },
-                      { scaleY: squishAnim },
-                    ],
-                  },
-                ]}
-              >
-                <View style={styles.liquidSheen} />
-              </Animated.View>
-            )}
-
-            {TAB_ITEMS.map(({ key, Icon }) => {
-              const active = activeTab === key;
-              return (
-                <TouchableOpacity key={key} style={styles.tabItem} onPress={() => setActiveTab(key)}>
-                  <Icon color={active ? "#ffffff" : "rgba(255,255,255,0.5)"} size={20} />
-                  <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
-                    {TAB_LABELS[key]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </BlurView>
-      </View>
+      <LiquidTabBar
+        items={TAB_ITEMS}
+        activeIndex={activeIndex}
+        onChange={(_, item) => setActiveTab(item.key as TabKey)}
+        tone="dark"
+      />
 
       <Modal visible={manualVisible} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
@@ -365,66 +310,6 @@ function createStyles(colors: ThemeColors) {
     },
     manualButtonText: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.text },
     content: { flex: 1 },
-
-    tabBarWrapper: {
-      position: "absolute",
-      left: 20,
-      right: 20,
-      bottom: Platform.OS === "ios" ? 32 : 20,
-    },
-    tabBar: {
-      borderRadius: 30,
-      overflow: "hidden",
-      paddingVertical: 10,
-      paddingHorizontal: 8,
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.18)",
-      backgroundColor: "rgba(20,20,20,0.35)",
-      ...Platform.select({
-        ios: {
-          shadowColor: "#000000",
-          shadowOpacity: 0.3,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 10 },
-        },
-        android: { elevation: 12 },
-      }),
-    },
-    tabBarInner: {
-      flexDirection: "row",
-      position: "relative",
-    },
-    liquidIndicator: {
-      position: "absolute",
-      top: 0,
-      bottom: 0,
-      borderRadius: 22,
-      backgroundColor: "rgba(255,255,255,0.20)",
-      borderWidth: 1,
-      borderColor: "rgba(255,255,255,0.40)",
-      overflow: "hidden",
-      ...Platform.select({
-        ios: {
-          shadowColor: "#ffffff",
-          shadowOpacity: 0.3,
-          shadowRadius: 10,
-          shadowOffset: { width: 0, height: 0 },
-        },
-        android: {},
-      }),
-    },
-    liquidSheen: {
-      position: "absolute",
-      top: 2,
-      left: 4,
-      right: 4,
-      height: "45%",
-      borderRadius: 18,
-      backgroundColor: "rgba(255,255,255,0.22)",
-    },
-    tabItem: { flex: 1, alignItems: "center", gap: 3, paddingVertical: 8 },
-    tabLabel: { fontSize: 10, color: "rgba(255,255,255,0.55)", fontFamily: FONT_MEDIUM },
-    tabLabelActive: { color: "#ffffff", fontFamily: FONT_DEMI },
 
     modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: "center", alignItems: "center" },
     modalBox: { width: "85%", backgroundColor: colors.background, borderRadius: 16, padding: 20 },
