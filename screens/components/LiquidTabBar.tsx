@@ -32,13 +32,22 @@ type Props = {
   items: LiquidTabItem[];
   activeIndex: number;
   onChange: (index: number, item: LiquidTabItem) => void;
-  /** "dark" = dark glass with white drop (your current look), "light" = light glass */
+  /** follow the app theme: "light" = light liquid glass, "dark" = dark liquid glass */
   tone?: "dark" | "light";
+  /** colour of the selected tab (iOS blue by default) */
+  accent?: string;
+  /** optional round glass button beside the bar (iOS 26 style, like Apple Music's Search) */
+  action?: {
+    icon: React.ReactNode;
+    onPress: () => void;
+    accessibilityLabel: string;
+  };
 };
 
-const ITEM_HEIGHT = 56;
+const ITEM_HEIGHT = 54;
+const ACTION_SIZE = 62;
 
-export default function LiquidTabBar({ items, activeIndex, onChange, tone = "dark" }: Props) {
+export default function LiquidTabBar({ items, activeIndex, onChange, tone = "dark", accent, action }: Props) {
   const [barWidth, setBarWidth] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [ripple, setRipple] = useState<{ x: number; n: number } | null>(null);
@@ -227,89 +236,100 @@ export default function LiquidTabBar({ items, activeIndex, onChange, tone = "dar
   };
 
   const isDark = tone === "dark";
-  const fg = isDark ? "#ffffff" : "#0B132B";
-  const fgSoft = isDark ? "rgba(255,255,255,0.55)" : "rgba(11,19,43,0.55)";
+  const fg = accent ?? (isDark ? "#0A84FF" : "#007AFF"); // selected tab
+  const fgSoft = isDark ? "#FFFFFF" : "#000000"; // other tabs
+  const glass = isDark ? styles.barDark : styles.barLight;
+  const selFill = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)";
 
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
-      <BlurView
-        intensity={55}
-        tint={isDark ? "dark" : "light"}
-        style={[styles.bar, isDark ? styles.barDark : styles.barLight]}
-      >
-        <View
-          style={styles.inner}
-          onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width)}
-          accessibilityRole="tablist"
-        >
-          {derived && (
-            <>
-              {/* droplets sit behind the main drop */}
-              <Animated.View pointerEvents="none" style={[styles.droplet, { width: 12, height: 12, borderRadius: 6 }, derived.drop1]} />
-              <Animated.View pointerEvents="none" style={[styles.droplet, { width: 9, height: 9, borderRadius: 4.5 }, derived.drop2]} />
+      <View style={[styles.shadow, styles.barWrap]}>
+        <BlurView intensity={40} tint={isDark ? "dark" : "light"} style={[styles.bar, glass]}>
+          <View
+            style={styles.inner}
+            onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width)}
+            accessibilityRole="tablist"
+          >
+            {derived && (
+              <>
+                {/* droplets sit behind the main drop */}
+                <Animated.View pointerEvents="none" style={[styles.droplet, { width: 12, height: 12, borderRadius: 6, backgroundColor: selFill }, derived.drop1]} />
+                <Animated.View pointerEvents="none" style={[styles.droplet, { width: 9, height: 9, borderRadius: 4.5, backgroundColor: selFill }, derived.drop2]} />
 
-              {/* the water drop */}
-              <Animated.View pointerEvents="none" style={[styles.blob, derived.blob]}>
-                <View style={styles.sheen} />
-                <View style={styles.rimLow} />
-              </Animated.View>
+                {/* soft highlight behind the selected tab */}
+                <Animated.View pointerEvents="none" style={[styles.blob, { backgroundColor: selFill }, derived.blob]} />
 
-              {/* tap ripple */}
-              {ripple && (
-                <Animated.View
-                  key={ripple.n}
-                  pointerEvents="none"
-                  style={[
-                    styles.ripple,
-                    {
-                      width: itemW * 0.8,
-                      left: ripple.x - (itemW * 0.8) / 2,
-                      borderColor: isDark ? "rgba(255,255,255,0.7)" : "rgba(0,120,220,0.5)",
-                      opacity: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-                      transform: [
-                        { scaleX: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.45] }) },
-                        { scaleY: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.15] }) },
-                      ],
-                    },
-                  ]}
-                />
-              )}
-            </>
-          )}
-
-          {items.map((item, i) => {
-            const active = i === activeIndex;
-            const { Icon } = item;
-            const liftY = lift[i].interpolate({ inputRange: [0, 1], outputRange: [0, -1] });
-            const liftS = lift[i].interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
-            return (
-              <Pressable
-                key={item.key}
-                style={styles.item}
-                onPress={() => handlePress(i)}
-                accessibilityRole="tab"
-                accessibilityLabel={item.label}
-                accessibilityState={{ selected: active }}
-                hitSlop={4}
-              >
-                <Animated.View style={{ transform: [{ translateY: liftY }, { scale: liftS }] }}>
+                {/* tap ripple */}
+                {ripple && (
                   <Animated.View
+                    key={ripple.n}
+                    pointerEvents="none"
                     style={[
-                      { transform: fxTransform(item.fx, fxAnims[i]) as any },
-                      item.fx === "wave" && { transformOrigin: "50% 92%" },
+                      styles.ripple,
+                      {
+                        width: itemW * 0.8,
+                        left: ripple.x - (itemW * 0.8) / 2,
+                        borderColor: fg,
+                        opacity: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+                        transform: [
+                          { scaleX: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.45] }) },
+                          { scaleY: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.15] }) },
+                        ],
+                      },
                     ]}
-                  >
-                    <Icon color={active ? fg : fgSoft} size={21} strokeWidth={active ? 2.2 : 1.8} />
+                  />
+                )}
+              </>
+            )}
+
+            {items.map((item, i) => {
+              const active = i === activeIndex;
+              const { Icon } = item;
+              const liftY = lift[i].interpolate({ inputRange: [0, 1], outputRange: [0, -1] });
+              const liftS = lift[i].interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+              return (
+                <Pressable
+                  key={item.key}
+                  style={styles.item}
+                  onPress={() => handlePress(i)}
+                  accessibilityRole="tab"
+                  accessibilityLabel={item.label}
+                  accessibilityState={{ selected: active }}
+                  hitSlop={4}
+                >
+                  <Animated.View style={{ transform: [{ translateY: liftY }, { scale: liftS }] }}>
+                    <Animated.View
+                      style={[
+                        { transform: fxTransform(item.fx, fxAnims[i]) as any },
+                        item.fx === "wave" && { transformOrigin: "50% 92%" },
+                      ]}
+                    >
+                      <Icon color={active ? fg : fgSoft} size={23} strokeWidth={active ? 2.2 : 1.9} />
+                    </Animated.View>
                   </Animated.View>
-                </Animated.View>
-                <Text style={[styles.label, { color: active ? fg : fgSoft }, active && styles.labelActive]}>
-                  {item.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </BlurView>
+                  <Text style={[styles.label, { color: active ? fg : fgSoft }, active && styles.labelActive]}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </BlurView>
+      </View>
+
+      {/* separate round glass action button */}
+      {action && (
+        <Pressable
+          onPress={action.onPress}
+          accessibilityRole="button"
+          accessibilityLabel={action.accessibilityLabel}
+          style={({ pressed }) => [styles.shadow, { borderRadius: ACTION_SIZE / 2 }, pressed && { transform: [{ scale: 0.93 }] }]}
+        >
+          <BlurView intensity={40} tint={isDark ? "dark" : "light"} style={[styles.action, glass]}>
+            {action.icon}
+          </BlurView>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -320,32 +340,48 @@ const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
 const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: 20,
-    right: 20,
-    bottom: Platform.OS === "ios" ? 32 : 20,
+    left: 16,
+    right: 16,
+    bottom: Platform.OS === "ios" ? 30 : 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
-  bar: {
-    borderRadius: 34,
-    overflow: "hidden",
-    padding: 8,
-    borderWidth: 1,
+  shadow: {
     ...Platform.select({
       ios: {
         shadowColor: "#000",
-        shadowOpacity: 0.3,
-        shadowRadius: 18,
-        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.14,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
       },
-      android: { elevation: 12 },
+      android: { elevation: 8 },
     }),
   },
+  barWrap: { flex: 1, borderRadius: ITEM_HEIGHT / 2 + 4 },
+  bar: {
+    borderRadius: ITEM_HEIGHT / 2 + 4,
+    overflow: "hidden",
+    padding: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  // liquid glass: see-through tint + bright hairline edge
   barDark: {
-    backgroundColor: "rgba(40,40,40,0.45)",
-    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(40,40,44,0.55)",
+    borderColor: "rgba(255,255,255,0.16)",
   },
   barLight: {
-    backgroundColor: "rgba(255,255,255,0.35)",
-    borderColor: "rgba(255,255,255,0.7)",
+    backgroundColor: "rgba(255,255,255,0.6)",
+    borderColor: "rgba(255,255,255,0.85)",
+  },
+  action: {
+    width: ACTION_SIZE,
+    height: ACTION_SIZE,
+    borderRadius: ACTION_SIZE / 2,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
   },
   inner: {
     flexDirection: "row",
@@ -358,36 +394,11 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     borderRadius: ITEM_HEIGHT / 2,
-    backgroundColor: "rgba(255,255,255,0.24)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-    overflow: "hidden",
-  },
-  sheen: {
-    position: "absolute",
-    top: 2,
-    left: 6,
-    right: 6,
-    height: "46%",
-    borderRadius: ITEM_HEIGHT / 2,
-    backgroundColor: "rgba(255,255,255,0.22)",
-  },
-  rimLow: {
-    position: "absolute",
-    bottom: 0,
-    left: 10,
-    right: 10,
-    height: 6,
-    borderRadius: 6,
-    backgroundColor: "rgba(160,215,255,0.16)",
   },
   droplet: {
     position: "absolute",
     left: 0,
     top: ITEM_HEIGHT / 2 - 6,
-    backgroundColor: "rgba(255,255,255,0.55)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.7)",
   },
   ripple: {
     position: "absolute",
@@ -400,8 +411,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 2,
   },
-  label: { fontSize: 12, fontFamily: FONT_MEDIUM },
+  label: { fontSize: 11, fontFamily: FONT_MEDIUM, fontWeight: "500" },
   labelActive: { fontFamily: FONT_DEMI, fontWeight: "600" },
 });

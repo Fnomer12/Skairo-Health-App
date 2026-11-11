@@ -7,11 +7,15 @@ import Svg, { Path, Circle, Line, Defs, LinearGradient, Stop } from "react-nativ
 import { Activity, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 import { Reading } from "../../db/records";
 import { useTheme, ThemeColors } from "../../context/ThemeContext";
+import MascotBubble, { MascotPose } from "../components/MascotBubble";
+import TrendsCard from "../components/TrendsCard";
+import ReadingCard from "../components/ReadingCard";
 
 type Props = {
   records: Reading[];
   loading: boolean;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  topInset?: number; // height of the floating header above the list
 };
 
 type VitalKey = "heartRate" | "temperature" | "spo2" | "respiratoryRate";
@@ -102,7 +106,7 @@ function buildSmoothPath(points: Array<{ x: number; y: number }>): string {
   return d;
 }
 
-export default function DashboardTab({ records, loading, onScroll }: Props) {
+export default function DashboardTab({ records, loading, onScroll, topInset = 0 }: Props) {
   const { colors } = useTheme();
   const styles = createStyles(colors);
 
@@ -111,9 +115,102 @@ export default function DashboardTab({ records, loading, onScroll }: Props) {
   const classification = classify(records, loading);
   const recentRecords = useMemo(() => records.slice(0, RECENT_LIMIT), [records]);
 
-  // Chronological (oldest -> newest) series of the selected vital, built
-  // from the most recent CHART_POINTS readings, skipping any where that
-  // particular vital wasn't captured.
+   const latest = records[0];
+
+  const looksImplausible =
+    !!latest &&
+    (latest.temperature < 30 || latest.temperature > 45 ||
+      latest.spo2 < 50 || latest.spo2 > 100 ||
+      latest.heartRate < 20 || latest.heartRate > 250 ||
+      (latest.respiratoryRate != null && (latest.respiratoryRate < 4 || latest.respiratoryRate > 60)));
+
+    // Pulse picks a pose + message for the situation (null = no mascot, e.g. Critical)
+  const mascot = useMemo((): { pose: MascotPose; message: string } | null => {
+    if (!latest) {
+      return { pose: "measuring", message: "Hi! Take your first reading and I'll keep track of how you're doing." };
+    }
+    const status = latest.status?.toLowerCase() ?? "";
+    const daysSince = Math.floor((Date.now() - new Date(latest.recordedAt).getTime()) / 86_400_000);
+    const isNormal = (st: string | null) => {
+      const x = st?.toLowerCase() ?? "";
+      return !!st && !x.includes("high") && !x.includes("warn") && !x.includes("elevated") && !x.includes("critical");
+    };
+    const goodStreak = records.length >= 3 && records.slice(0, 3).every((r) => isNormal(r.status));
+    const temp = latest.temperature;
+    const hr = latest.heartRate;
+    const rr = latest.respiratoryRate ?? null;
+
+    // 1. Critical → no mascot (the red banner says it all)
+    if (status.includes("critical")) return null;
+
+    // 2. Impossible values → check the entry
+    if (looksImplausible) {
+      return { pose: "thinking", message: "Hmm, some values in your last reading look unusual. Please check the entry or take a new reading." };
+    }
+
+    // 3. Fever (38.0 °C or more) — shown for device AND manual readings
+    if (temp >= 38) {
+      return {
+        pose: "feverish",
+        message: `Your temperature is ${temp.toFixed(1)}°C — that's a fever. Rest, drink plenty of fluids, and contact a health professional if it stays high or you feel unwell.`,
+      };
+    }
+
+    // 4. Manual reading → not checked by the device
+    if (!latest.status) {
+      return {
+        pose: "thinking",
+        message: "This reading was added manually, so it hasn't been checked by the device. Take a reading with Skairo for a full check.",
+      };
+    }
+
+    // 5. High
+    if (status.includes("high")) {
+      return { pose: "alert", message: "Your latest reading is High. Please contact a health professional soon." };
+    }
+
+    // 6. Slightly off → pick the pose that matches the cause
+    if (status.includes("warn") || status.includes("elevated")) {
+      if (rr != null && rr >= 21) {
+        return {
+          pose: "calm",
+          message: `Your breathing is a little fast (${Math.round(rr)}/min). Sit down, breathe in slowly for 4 and out for 6, then measure again.`,
+        };
+      }
+      if (hr > 90) {
+        return {
+          pose: "active",
+          message: `Your heart rate is up (${Math.round(hr)} bpm). If you've just been active, rest for 5 minutes and take another reading.`,
+        };
+      }
+      return { pose: "concerned", message: "Your latest reading is a little off. Take another one later and see how it changes." };
+    }
+
+    // 7. No check-in for a while
+    if (daysSince >= 3) {
+      return { pose: "sleepy", message: `It's been ${daysSince} days since your last check-in. Take a quick reading today?` };
+    }
+
+    // 8. Slightly warm (37.5–37.9 °C) but still in range
+    if (temp >= 37.5) {
+      return {
+        pose: "hydrating",
+        message: `You're a little warm (${temp.toFixed(1)}°C). Drink some water and check again later.`,
+      };
+    }
+
+    // 9. Good streak
+    if (goodStreak) {
+      return { pose: "celebrating", message: "Three good readings in a row! 🎉 Keep it up." };
+    }
+
+    // 10. All good — alternate with a water tip so Pulse doesn't feel repetitive
+    if (new Date().getDate() % 2 === 0) {
+      return { pose: "hydrating", message: "Your latest reading looks good. Remember to drink water through the day! 💧" };
+    }
+    return { pose: "happy", message: "Your latest reading looks good. Keep up your check-ins!" };
+  }, [latest, records, looksImplausible]);
+ 
   const chartSeries = useMemo(() => {
     return records
       .slice(0, CHART_POINTS)
@@ -160,131 +257,17 @@ export default function DashboardTab({ records, loading, onScroll }: Props) {
   const TrendIcon = trendDirection === "up" ? TrendingUp : trendDirection === "down" ? TrendingDown : Minus;
 
   return (
-    <Animated.FlatList
+        <Animated.FlatList
       data={recentRecords}
       keyExtractor={(item) => String(item.id)}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingTop: topInset + 4 }]}
+      scrollIndicatorInsets={{ top: topInset }}
       onScroll={onScroll}
       scrollEventThrottle={16}
       ListHeaderComponent={
         <View>
-          <View style={[styles.summaryCard, { backgroundColor: classification.color }]}>
-            <View style={styles.cardIconBleedLarge} pointerEvents="none">
-              <Activity color="rgba(255,255,255,0.14)" size={190} strokeWidth={1.2} />
-            </View>
-
-            <View style={styles.summaryTopRow}>
-              <Text style={styles.summaryTitle}>Trends</Text>
-              <View style={styles.classBadge}>
-                <Text style={styles.classBadgeText}>{classification.label}</Text>
-              </View>
-            </View>
-
-            <View style={styles.vitalPickerRow}>
-              {VITAL_ORDER.map((key) => {
-                const active = key === selectedVital;
-                return (
-                  <TouchableOpacity
-                    key={key}
-                    style={[styles.vitalPill, active && styles.vitalPillActive]}
-                    activeOpacity={0.75}
-                    onPress={() => setSelectedVital(key)}
-                  >
-                    <Text style={[styles.vitalPillText, active && styles.vitalPillTextActive]}>
-                      {VITAL_CONFIG[key].shortLabel}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {latestValue != null ? (
-              <View style={styles.currentValueRow}>
-                <Text style={styles.currentValueNumber}>
-                  {latestValue.toFixed(vitalConfig.decimals)}
-                  <Text style={styles.currentValueUnit}>{vitalUnitSuffix(selectedVital) || ` ${vitalConfig.unit}`}</Text>
-                </Text>
-                {trendDirection && delta != null && (
-                  <View style={styles.trendChip}>
-                    <TrendIcon color="#ffffff" size={12} strokeWidth={2.5} />
-                    {trendDirection !== "flat" && (
-                      <Text style={styles.trendChipText}>
-                        {Math.abs(delta).toFixed(vitalConfig.decimals)}
-                      </Text>
-                    )}
-                  </View>
-                )}
-              </View>
-            ) : (
-              <Text style={styles.noVitalData}>No {vitalConfig.fullLabel.toLowerCase()} readings yet</Text>
-            )}
-
-            {geometry && chartSeries.length > 1 ? (
-              <>
-                <View style={styles.chartWrap}>
-                  <Svg width="100%" height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} preserveAspectRatio="none">
-                    <Defs>
-                      <LinearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-                        <Stop offset="0" stopColor="#ffffff" stopOpacity={0.32} />
-                        <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
-                      </LinearGradient>
-                    </Defs>
-                    <Line
-                      x1={CHART_PAD_X} y1={CHART_PAD_TOP}
-                      x2={CHART_W - CHART_PAD_X} y2={CHART_PAD_TOP}
-                      stroke="rgba(255,255,255,0.14)" strokeWidth={1}
-                    />
-                    <Line
-                      x1={CHART_PAD_X} y1={CHART_H - CHART_PAD_BOTTOM}
-                      x2={CHART_W - CHART_PAD_X} y2={CHART_H - CHART_PAD_BOTTOM}
-                      stroke="rgba(255,255,255,0.14)" strokeWidth={1}
-                    />
-                    <Path d={geometry.areaPath} fill="url(#areaFill)" stroke="none" />
-                    <Path
-                      d={geometry.linePath}
-                      stroke="#ffffff" strokeWidth={2.5} fill="none"
-                      strokeLinecap="round" strokeLinejoin="round"
-                    />
-                    {geometry.points.map((pt, i) => {
-                      const isLast = i === geometry.points.length - 1;
-                      return (
-                        <Circle
-                          key={i}
-                          cx={pt.x} cy={pt.y}
-                          r={isLast ? 4.5 : 2.5}
-                          fill={isLast ? "#ffffff" : "rgba(255,255,255,0.6)"}
-                        />
-                      );
-                    })}
-                  </Svg>
-                </View>
-
-                <View style={styles.chartAxisRow}>
-                  <Text style={styles.chartAxisLabel}>{formatShortDate(chartSeries[0].date)}</Text>
-                  <Text style={styles.chartAxisLabel}>{formatShortDate(chartSeries[chartSeries.length - 1].date)}</Text>
-                </View>
-
-                <View style={styles.chartStatsRow}>
-                  <View style={styles.chartStatItem}>
-                    <Text style={styles.chartStatLabel}>Low</Text>
-                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.rawMin, selectedVital)}</Text>
-                  </View>
-                  <View style={styles.chartStatDivider} />
-                  <View style={styles.chartStatItem}>
-                    <Text style={styles.chartStatLabel}>Avg</Text>
-                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.avg, selectedVital)}</Text>
-                  </View>
-                  <View style={styles.chartStatDivider} />
-                  <View style={styles.chartStatItem}>
-                    <Text style={styles.chartStatLabel}>High</Text>
-                    <Text style={styles.chartStatValue}>{formatVitalValue(geometry.rawMax, selectedVital)}</Text>
-                  </View>
-                </View>
-              </>
-            ) : chartSeries.length === 1 ? (
-              <Text style={styles.chartHint}>Add another reading to start seeing a trend</Text>
-            ) : null}
-          </View>
+                  {!loading && mascot && <MascotBubble pose={mascot.pose} message={mascot.message} />}
+                <TrendsCard records={records} loading={loading} />
 
           <Text style={styles.recentHeading}>Recent takes</Text>
         </View>
@@ -297,45 +280,7 @@ export default function DashboardTab({ records, loading, onScroll }: Props) {
           </View>
         ) : null
       }
-      renderItem={({ item }) => {
-        const rr = item.respiratoryRate;
-        const bg = cardColor(item.status);
-        return (
-          <View style={[styles.recordCard, { backgroundColor: bg }]}>
-            <View style={styles.cardIconBleedSmall} pointerEvents="none">
-              <Activity color="rgba(255,255,255,0.16)" size={120} strokeWidth={1.4} />
-            </View>
-
-            <View style={styles.recordTopRow}>
-              <Text style={styles.recordDate}>{formatDate(item.recordedAt)}</Text>
-              {item.status && (
-                <View style={styles.recordStatusPill}>
-                  <Text style={styles.recordStatusPillText}>{item.status}</Text>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.vitalsRow}>
-              <View style={styles.vital}>
-                <Text style={styles.vitalValue}>{item.heartRate}</Text>
-                <Text style={styles.vitalLabel}>BPM</Text>
-              </View>
-              <View style={styles.vital}>
-                <Text style={styles.vitalValue}>{item.temperature}°</Text>
-                <Text style={styles.vitalLabel}>TEMP</Text>
-              </View>
-              <View style={styles.vital}>
-                <Text style={styles.vitalValue}>{item.spo2}%</Text>
-                <Text style={styles.vitalLabel}>SPO2</Text>
-              </View>
-              <View style={styles.vital}>
-                <Text style={styles.vitalValue}>{rr != null ? rr : "–"}</Text>
-                <Text style={styles.vitalLabel}>RESP</Text>
-              </View>
-            </View>
-          </View>
-        );
-      }}
+            renderItem={({ item }) => <ReadingCard reading={item} />}
     />
   );
 }

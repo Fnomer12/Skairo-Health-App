@@ -1,331 +1,209 @@
-import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Image, StyleSheet, useWindowDimensions, View } from "react-native";
-import Svg, { Circle, Rect, Defs, RadialGradient, Stop } from "react-native-svg";
-import { useFonts, DancingScript_700Bold } from "@expo-google-fonts/dancing-script";
-import { EncryptedText } from "./components/ui/EncryptedText";
-
-// Adjust the import above to wherever you place EncryptedText.tsx in your
-// project (e.g. "@/components/ui/EncryptedText" to match your other code).
+import React, { useEffect, useRef, useState } from "react";
+import { AccessibilityInfo, Animated, Easing, Image, Platform, StyleSheet, Text, View } from "react-native";
+import { useTheme } from "../context/ThemeContext";
+import { initDatabase, getProfiles } from "../db/profiles";
+import KineticDotsLoader from "./components/KineticDotsLoader";
 
 type Props = {
   onFinish: () => void;
 };
 
 const LOGO = require("../assets/images/skairo-logo.png");
+const PULSE = require("../assets/mascot/pulse-happy.png");
 
-const TITLE = "Skairo Health";
-const TOTAL_DURATION_MS = 3000;
+const TOTAL_MS = 2600; // how long the splash stays before fading out
 
-type BubbleConfig = {
-  leftPct: number; // 0-1, relative to container width
-  topPct: number; // 0-1, relative to container height
-  size: number; // diameter in px
-  floatRange: number; // px of vertical drift
-  pulseDuration: number;
-  floatDuration: number;
-  delay: number;
-  peakOpacity: number;
-};
+/**
+ * Splash "C · Pulse says hello":
+ * logo + name fade in → Pulse pops up and waves → speech bubble types in → bouncing dots → fade out.
+ */
+export default function AnimatedSplashScreen({ onFinish }: Props) {
+  const { resolvedScheme } = useTheme();
+  const isDark = resolvedScheme === "dark";
+  const c = isDark
+    ? { bg: "#000000", card: "#1C1C1E", text: "#FFFFFF", muted: "#8E8E93" }
+    : { bg: "#F2F2F7", card: "#FFFFFF", text: "#000000", muted: "#8E8E93" };
 
-// Scattered loosely around the title, varied sizes so it reads as organic
-// rather than a repeating pattern.
-const BUBBLES: BubbleConfig[] = [
-  { leftPct: 0.10, topPct: 0.14, size: 42, floatRange: 14, pulseDuration: 2600, floatDuration: 4200, delay: 0, peakOpacity: 0.5 },
-  { leftPct: 0.84, topPct: 0.12, size: 54, floatRange: 18, pulseDuration: 3100, floatDuration: 4800, delay: 300, peakOpacity: 0.45 },
-  { leftPct: 0.18, topPct: 0.80, size: 34, floatRange: 10, pulseDuration: 2200, floatDuration: 3600, delay: 600, peakOpacity: 0.55 },
-  { leftPct: 0.88, topPct: 0.74, size: 46, floatRange: 16, pulseDuration: 2900, floatDuration: 4500, delay: 150, peakOpacity: 0.4 },
-  { leftPct: 0.04, topPct: 0.46, size: 26, floatRange: 9, pulseDuration: 1900, floatDuration: 3200, delay: 900, peakOpacity: 0.5 },
-  { leftPct: 0.95, topPct: 0.40, size: 30, floatRange: 11, pulseDuration: 2400, floatDuration: 3800, delay: 450, peakOpacity: 0.45 },
-  { leftPct: 0.36, topPct: 0.04, size: 20, floatRange: 8, pulseDuration: 2000, floatDuration: 3300, delay: 1100, peakOpacity: 0.55 },
-  { leftPct: 0.64, topPct: 0.92, size: 22, floatRange: 8, pulseDuration: 2100, floatDuration: 3400, delay: 750, peakOpacity: 0.5 },
-  { leftPct: 0.50, topPct: 0.97, size: 34, floatRange: 12, pulseDuration: 2700, floatDuration: 4100, delay: 1350, peakOpacity: 0.4 },
-];
+  // greet the person if there's only one profile on this device
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        await initDatabase();
+        const profiles = await getProfiles();
+        if (profiles.length === 1) setName(profiles[0].firstName);
+      } catch {
+        // no greeting name — "Hi there!" is fine
+      }
+    })();
+  }, []);
 
-function Bubble({ config, areaSize }: { config: BubbleConfig; areaSize: number }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
+  const greeting = `Hi ${name ?? "there"}! 👋`;
+  const subline = "Let’s check how you’re doing.";
+  const [typed, setTyped] = useState(0); // characters of the subline shown
+
+  const screen = useRef(new Animated.Value(1)).current;
+  const brand = useRef(new Animated.Value(0)).current;
+  const pop = useRef(new Animated.Value(0)).current;
+  const wave = useRef(new Animated.Value(0)).current;
+  const bubble = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: config.peakOpacity,
-          duration: config.pulseDuration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: config.peakOpacity * 0.25,
-          duration: config.pulseDuration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    const floatLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateY, {
-          toValue: -config.floatRange,
-          duration: config.floatDuration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: config.floatDuration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    );
+    let cancelled = false;
+    let typeTimer: ReturnType<typeof setInterval> | undefined;
+    let finishTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const t = setTimeout(() => {
-      pulseLoop.start();
-      floatLoop.start();
-    }, config.delay);
+    const finish = () => {
+      Animated.timing(screen, { toValue: 0, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(
+        () => !cancelled && onFinish()
+      );
+    };
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .catch(() => false)
+      .then((reduce) => {
+        if (cancelled) return;
+        if (reduce) {
+          // no movement: show everything, wait a moment, go
+          [brand, pop, bubble].forEach((v) => v.setValue(1));
+          setTyped(subline.length);
+          finishTimer = setTimeout(finish, 1200);
+          return;
+        }
+
+        // 1. logo + name
+        Animated.timing(brand, { toValue: 1, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+
+        // 2. Pulse pops in, then waves twice
+        Animated.sequence([
+          Animated.delay(200),
+          Animated.spring(pop, { toValue: 1, friction: 5, tension: 90, useNativeDriver: true }),
+          Animated.timing(wave, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }),
+        ]).start();
+
+        // 3. bubble appears, then the line types in
+        Animated.sequence([
+          Animated.delay(650),
+          Animated.spring(bubble, { toValue: 1, friction: 6, tension: 110, useNativeDriver: true }),
+        ]).start(() => {
+          if (cancelled) return;
+          typeTimer = setInterval(() => {
+            setTyped((t) => {
+              if (t >= subline.length) {
+                if (typeTimer) clearInterval(typeTimer);
+                return t;
+              }
+              return t + 1;
+            });
+          }, 22);
+        });
+
+        finishTimer = setTimeout(finish, TOTAL_MS);
+      });
 
     return () => {
-      clearTimeout(t);
-      pulseLoop.stop();
-      floatLoop.stop();
+      cancelled = true;
+      if (typeTimer) clearInterval(typeTimer);
+      if (finishTimer) clearTimeout(finishTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const left = config.leftPct * areaSize - config.size / 2;
-  const top = config.topPct * areaSize - config.size / 2;
+  const waveRotate = wave.interpolate({
+    inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+    outputRange: ["0deg", "-7deg", "5deg", "-6deg", "3deg", "0deg"],
+  });
 
   return (
-    <Animated.View
-      style={{
-        position: "absolute",
-        left,
-        top,
-        width: config.size,
-        height: config.size,
-        opacity,
-        transform: [{ translateY }],
-      }}
-    >
-      <Svg width={config.size} height={config.size} viewBox="0 0 100 100">
-        <Defs>
-          <RadialGradient id={`glow-${config.leftPct}-${config.topPct}`} cx="50%" cy="50%" r="50%">
-            <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.9} />
-            <Stop offset="55%" stopColor="#FFFFFF" stopOpacity={0.35} />
-            <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
-        <Circle cx={50} cy={50} r={50} fill={`url(#glow-${config.leftPct}-${config.topPct})`} />
-      </Svg>
-    </Animated.View>
-  );
-}
-
-export default function AnimatedSplashScreen({ onFinish }: Props) {
-  const { width, height } = useWindowDimensions();
-  const [fontsLoaded] = useFonts({ DancingScript_700Bold });
-
-  const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoScale = useRef(new Animated.Value(0.75)).current;
-  const logoBreath = useRef(new Animated.Value(0)).current;
-  const haloOpacity = useRef(new Animated.Value(0)).current;
-
-  const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleTranslateY = useRef(new Animated.Value(10)).current;
-
-  const screenOpacity = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (!fontsLoaded) return;
-
-    // Logo lands first with a soft overshoot.
-    Animated.timing(logoOpacity, {
-      toValue: 1,
-      duration: 650,
-      delay: 100,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    Animated.timing(logoScale, {
-      toValue: 1,
-      duration: 650,
-      delay: 100,
-      easing: Easing.out(Easing.back(1.3)),
-      useNativeDriver: true,
-    }).start();
-    Animated.timing(haloOpacity, {
-      toValue: 1,
-      duration: 900,
-      delay: 150,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-
-    // A slow breathing pulse on the logo once it's settled, echoing the
-    // heartbeat line built into the mark itself.
-    const breathLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(logoBreath, {
-          toValue: 1,
-          duration: 1400,
-          easing: Easing.inOut(Easing.sin),
-          delay: 750,
-          useNativeDriver: true,
-        }),
-        Animated.timing(logoBreath, {
-          toValue: 0,
-          duration: 1400,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    breathLoop.start();
-
-    // Title rises in underneath once the logo has mostly landed.
-    Animated.timing(titleOpacity, {
-      toValue: 1,
-      duration: 550,
-      delay: 500,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-    Animated.timing(titleTranslateY, {
-      toValue: 0,
-      duration: 550,
-      delay: 500,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-
-    const endTimer = setTimeout(() => {
-      breathLoop.stop();
-      Animated.timing(screenOpacity, {
-        toValue: 0,
-        duration: 400,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) onFinish();
-      });
-    }, TOTAL_DURATION_MS);
-
-    return () => {
-      clearTimeout(endTimer);
-      breathLoop.stop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fontsLoaded]);
-
-  if (!fontsLoaded) {
-    // Keep the screen solid black (no flash of the wrong font) while the
-    // custom font finishes loading.
-    return <View style={styles.root} />;
-  }
-
-  const titleSize = Math.min(Math.max(width * 0.11, 30), 48);
-  const logoSize = Math.min(Math.max(width * 0.38, 140), 220);
-  const bubbleAreaSize = Math.min(width, height) * 0.95;
-
-  const breathScale = logoBreath.interpolate({ inputRange: [0, 1], outputRange: [1, 1.035] });
-
-  return (
-    <Animated.View style={[styles.root, { opacity: screenOpacity }]}>
-      <Svg width={width} height={height} style={StyleSheet.absoluteFill}>
-        <Defs>
-          <RadialGradient id="vignette" cx="50%" cy="44%" r="70%">
-            <Stop offset="0%" stopColor="#141414" stopOpacity={1} />
-            <Stop offset="100%" stopColor="#000000" stopOpacity={1} />
-          </RadialGradient>
-        </Defs>
-        <Rect x={0} y={0} width={width} height={height} fill="url(#vignette)" />
-      </Svg>
-
-      <View
-        style={{
-          width: bubbleAreaSize,
-          height: bubbleAreaSize,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+    <Animated.View style={[styles.container, { backgroundColor: c.bg, opacity: screen }]}>
+      {/* logo + name */}
+      <Animated.View
+        style={[
+          styles.brand,
+          {
+            opacity: brand,
+            transform: [{ translateY: brand.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+          },
+        ]}
       >
-        {BUBBLES.map((b, i) => (
-          <Bubble key={i} config={b} areaSize={bubbleAreaSize} />
-        ))}
-
-        <View style={{ alignItems: "center", justifyContent: "center" }}>
-          {/* Soft halo seated behind the logo so it reads as glowing on black */}
-          <Animated.View
-            style={{
-              position: "absolute",
-              width: logoSize * 1.5,
-              height: logoSize * 1.5,
-              opacity: haloOpacity,
-            }}
-          >
-            <Svg width="100%" height="100%" viewBox="0 0 100 100">
-              <Defs>
-                <RadialGradient id="logoHalo" cx="50%" cy="50%" r="50%">
-                  <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.22} />
-                  <Stop offset="60%" stopColor="#FFFFFF" stopOpacity={0.07} />
-                  <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={0} />
-                </RadialGradient>
-              </Defs>
-              <Circle cx={50} cy={50} r={50} fill="url(#logoHalo)" />
-            </Svg>
-          </Animated.View>
-
-          <Animated.Image
-            source={LOGO}
-            resizeMode="contain"
-            style={{
-              width: logoSize,
-              height: logoSize,
-              opacity: logoOpacity,
-              transform: [{ scale: Animated.multiply(logoScale, breathScale) }],
-            }}
-          />
-
-          <Animated.View
-            style={{
-              marginTop: titleSize * 0.35,
-              opacity: titleOpacity,
-              transform: [{ translateY: titleTranslateY }],
-            }}
-          >
-            <EncryptedText
-              text={TITLE}
-              startDelayMs={500}
-              revealDelayMs={70}
-              scrambleIntervalMs={40}
-              style={[styles.title, { fontSize: titleSize }]}
-              encryptedStyle={styles.titleEncrypted}
-              revealedStyle={styles.titleRevealed}
-            />
-          </Animated.View>
+        <View style={styles.logoTile}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
         </View>
+        <Text style={[styles.brandText, { color: c.text }]}>Skairo Health</Text>
+      </Animated.View>
+
+      <View style={styles.center}>
+        {/* speech bubble */}
+        <Animated.View
+          style={[
+            styles.bubble,
+            {
+              backgroundColor: c.card,
+              opacity: bubble,
+              transform: [
+                { translateY: bubble.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+                { scale: bubble.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) },
+              ],
+            },
+          ]}
+        >
+          <Text style={[styles.hello, { color: c.text }]}>{greeting}</Text>
+          <Text style={[styles.sub, { color: c.muted }]}>
+            {subline.slice(0, typed)}
+            {/* keeps the bubble from changing size while typing */}
+            <Text style={{ color: "transparent" }}>{subline.slice(typed)}</Text>
+          </Text>
+          <View style={[styles.tail, { backgroundColor: c.card }]} />
+        </Animated.View>
+
+        {/* Pulse */}
+        <Animated.View
+          style={{
+            opacity: pop,
+            transform: [
+              { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
+              { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
+              { rotate: waveRotate },
+            ],
+          }}
+        >
+          <Image source={PULSE} style={styles.mascot} resizeMode="contain" accessibilityLabel="Pulse waving hello" />
+        </Animated.View>
       </View>
+
+      {/* loading — bouncing liquid dots */}
+      <Animated.View style={[styles.loader, { opacity: brand }]}>
+        <KineticDotsLoader dots={4} size={14} height={26} colors={["#7EE8C8", "#22A68A"]} glow="#2BBF9A" />
+      </Animated.View>
     </Animated.View>
   );
 }
+
+const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
+const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
+const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#000000",
-    alignItems: "center",
-    justifyContent: "center",
+  container: { flex: 1, alignItems: "center" },
+  brand: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 92 },
+  logoTile: {
+    width: 34, height: 34, borderRadius: 9, backgroundColor: "#FFFFFF",
+    alignItems: "center", justifyContent: "center", overflow: "hidden",
   },
-  title: {
-    fontFamily: "DancingScript_700Bold",
-    letterSpacing: 0,
-    color: "#FFFFFF",
-    textAlign: "center",
+  logo: { width: 30, height: 30 },
+  brandText: { fontSize: 19, fontFamily: FONT_BOLD, fontWeight: "700", letterSpacing: -0.2 },
+
+  center: { flex: 1, alignItems: "center", justifyContent: "center", paddingBottom: 40 },
+  bubble: {
+    maxWidth: 270, paddingHorizontal: 18, paddingVertical: 13, borderRadius: 20, alignItems: "center",
+    shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 3,
   },
-  titleEncrypted: {
-    color: "#6B6B6B",
+  hello: { fontSize: 19, fontFamily: FONT_BOLD, fontWeight: "700" },
+  sub: { fontSize: 15, fontFamily: FONT_MEDIUM, marginTop: 3, textAlign: "center" },
+  tail: {
+    position: "absolute", bottom: -7, width: 16, height: 16, borderRadius: 3, transform: [{ rotate: "45deg" }],
   },
-  titleRevealed: {
-    color: "#FFFFFF",
-  },
+  mascot: { width: 240, height: 240, marginTop: 18 },
+
+  loader: { marginBottom: 60 },
 });

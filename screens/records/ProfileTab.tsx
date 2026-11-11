@@ -1,12 +1,11 @@
 import React, { useState } from "react";
 import {
-  View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity,
-  Modal, TextInput, Alert, ActivityIndicator, Image, KeyboardAvoidingView,
+  View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Pressable,
+  Modal, TextInput, Alert, ActivityIndicator, Image, KeyboardAvoidingView, Share,
   NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
 import {
-  Pencil, Trash2, Camera, Calendar, Mars, Venus, Activity,
-  Fingerprint, AlertTriangle, ChevronRight, UserRound, Sun, Check,
+  Camera, Calendar, Mars, Venus, Fingerprint, AlertTriangle, ChevronRight, UserRound, Moon,
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -20,68 +19,65 @@ type Props = {
   onProfileUpdated: (updated: Profile) => void;
   onProfileDeleted: () => void;
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  topInset?: number; // height of the floating header above the page
 };
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 120 }, (_, i) => CURRENT_YEAR - i);
 
-// Read straight from app.json at build time -- no extra dependency (no
-// expo-constants, no native rebuild needed), and it stays correct
-// automatically whenever app.json's version bumps.
 const APP_VERSION: string = appConfig?.expo?.version ?? "1.0.0";
 
-function formatDob(dateOfBirth: string): string {
+function formatDobShort(dateOfBirth: string): string {
   const [year, month, day] = dateOfBirth.split("-").map(Number);
-  return `${MONTHS[month - 1]} ${day}, ${year}`;
+  return `${MONTHS_SHORT[month - 1]} ${day}, ${year}`;
 }
 
-// Static (non-theme-reactive) mock-UI swatches — each one shows what that
-// appearance mode actually looks like, the way iOS/Twitter/Telegram's own
-// appearance pickers do, instead of just a labeled button.
-const SWATCH = StyleSheet.create({
-  full: { flex: 1, padding: 9, justifyContent: "center" },
-  split: { flex: 1, flexDirection: "row" },
-  half: { flex: 1, padding: 7, justifyContent: "center" },
-  bar: { height: 7, borderRadius: 4, marginBottom: 7, width: "75%" },
-  line: { height: 5, borderRadius: 3, marginTop: 5 },
-});
+// Apple Settings–style colours (same palette as the cards on the other tabs)
+const PAL = {
+  light: {
+    group: "#FFFFFF",
+    edge: "rgba(0,0,0,0.07)",
+    shadow: 0.05,
+    text: "#000000",
+    muted: "#8E8E93",
+    faint: "#C7C7CC",
+    sep: "#E5E5EA",
+    blue: "#007AFF",
+    red: "#FF3B30",
+    segBg: "#EEEEF0",
+    segOn: "#FFFFFF",
+    avatar: "#8E99AB",
+    themeIcon: "#1C1C1E",
+  },
+  dark: {
+    group: "#1C1C1E",
+    edge: "transparent",
+    shadow: 0,
+    text: "#FFFFFF",
+    muted: "#8E8E93",
+    faint: "#48484A",
+    sep: "#38383A",
+    blue: "#0A84FF",
+    red: "#FF453A",
+    segBg: "#2C2C2E",
+    segOn: "#636366",
+    avatar: "#5B6577",
+    themeIcon: "#3A3A3C",
+  },
+};
 
-function ThemePreviewSwatch({ variant }: { variant: "light" | "dark" | "system" }) {
-  if (variant === "system") {
-    return (
-      <View style={SWATCH.split}>
-        <View style={[SWATCH.half, { backgroundColor: "#ffffff" }]}>
-          <View style={[SWATCH.bar, { backgroundColor: "#e4e4e4", width: "85%" }]} />
-          <View style={[SWATCH.line, { backgroundColor: "#e4e4e4", width: "70%" }]} />
-        </View>
-        <View style={[SWATCH.half, { backgroundColor: "#000000" }]}>
-          <View style={[SWATCH.bar, { backgroundColor: "#303032", width: "85%" }]} />
-          <View style={[SWATCH.line, { backgroundColor: "#303032", width: "70%" }]} />
-        </View>
-      </View>
-    );
-  }
-  const isLight = variant === "light";
-  const bg = isLight ? "#ffffff" : "#000000";
-  const barColor = isLight ? "#eeeeee" : "#242426";
-  const lineColor = isLight ? "#dcdcdc" : "#3a3a3a";
-  return (
-    <View style={[SWATCH.full, { backgroundColor: bg }]}>
-      <View style={[SWATCH.bar, { backgroundColor: barColor }]} />
-      <View style={[SWATCH.line, { backgroundColor: lineColor, width: "68%" }]} />
-      <View style={[SWATCH.line, { backgroundColor: lineColor, width: "48%" }]} />
-    </View>
-  );
-}
+const ICON_BG = { dob: "#FF9500", sex: "#5E5CE6", id: "#8E8E93", allergy: "#FF3B30" };
 
-export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted, onScroll }: Props) {
-  const { colors, mode, setMode } = useTheme();
+export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted, onScroll, topInset = 0 }: Props) {
+  const { colors, mode, setMode, resolvedScheme } = useTheme();
   const styles = createStyles(colors);
+  const p = resolvedScheme === "dark" ? PAL.dark : PAL.light;
 
   const [editVisible, setEditVisible] = useState(false);
   const [firstName, setFirstName] = useState(profile.firstName);
@@ -250,6 +246,10 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
     }
   }
 
+  function shareId() {
+    Share.share({ message: `My Skairo Health profile ID: ${profile.publicId}` }).catch(() => {});
+  }
+
   const GenderIcon = profile.gender === "Male" ? Mars : profile.gender === "Female" ? Venus : UserRound;
 
   const THEME_OPTIONS: Array<{ key: ThemeMode; label: string }> = [
@@ -258,155 +258,200 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
     { key: "system", label: "Auto" },
   ];
 
+  const subtitle = [profile.gender, age != null ? `${age} years` : null, `ID ${profile.publicId}`]
+    .filter(Boolean)
+    .join(" · ");
+
+  const groupStyle = [
+    styles.group,
+    {
+      backgroundColor: p.group,
+      borderColor: p.edge,
+      borderWidth: resolvedScheme === "dark" ? 0 : StyleSheet.hairlineWidth,
+      shadowOpacity: p.shadow,
+    },
+  ];
+
+  // one settings row
+  function Row({
+    icon,
+    iconBg,
+    label,
+    value,
+    valueStyle,
+    onPress,
+    chevron = true,
+    last = false,
+  }: {
+    icon: React.ReactNode;
+    iconBg: string;
+    label: string;
+    value?: React.ReactNode;
+    valueStyle?: object;
+    onPress?: () => void;
+    chevron?: boolean;
+    last?: boolean;
+  }) {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={!onPress}
+        style={({ pressed }) => [styles.row, pressed && { backgroundColor: p.segBg }]}
+      >
+        <View style={[styles.iconTile, { backgroundColor: iconBg }]}>{icon}</View>
+        <View style={[styles.rowBody, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: p.sep }]}>
+          <Text style={[styles.rowLabel, { color: p.text }]}>{label}</Text>
+          <View style={styles.rowRight}>
+            {typeof value === "string" ? (
+              <Text style={[styles.rowValue, { color: p.muted }, valueStyle]} numberOfLines={1}>
+                {value}
+              </Text>
+            ) : (
+              value
+            )}
+            {chevron && onPress && <ChevronRight size={17} color={p.faint} strokeWidth={2.4} />}
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <ScrollView
+          <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingTop: topInset + 8 }]}
+        scrollIndicatorInsets={{ top: topInset }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
-        <View style={styles.heroCard}>
-          <Activity color={colors.onAccentFaint} size={130} strokeWidth={1.3} style={styles.heroPulseLeft} />
-          <Activity color={colors.onAccentFaint} size={130} strokeWidth={1.3} style={styles.heroPulseRight} />
-
-          <TouchableOpacity style={styles.avatarWrapper} onPress={handleAvatarPress} disabled={photoBusy}>
-            <View style={styles.avatarRing}>
-              <View style={styles.avatarCircle}>
-                {photoBusy ? (
-                  <ActivityIndicator color={colors.accent} />
-                ) : profile.photoUri ? (
-                  <Image source={{ uri: profile.photoUri }} style={styles.avatarImage} />
-                ) : (
-                  <Text style={styles.avatarText}>{initials}</Text>
-                )}
-              </View>
+        {/* header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleAvatarPress} disabled={photoBusy} activeOpacity={0.8} accessibilityLabel="Change profile photo">
+            <View style={[styles.avatar, { backgroundColor: p.avatar }]}>
+              {photoBusy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : profile.photoUri ? (
+                <Image source={{ uri: profile.photoUri }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>{initials}</Text>
+              )}
             </View>
-            <View style={styles.cameraBadge}>
-              <Camera color={colors.accentText} size={12} strokeWidth={2.4} />
+            <View style={[styles.cameraBadge, { backgroundColor: p.blue, borderColor: colors.background }]}>
+              <Camera color="#FFFFFF" size={14} strokeWidth={2.4} />
             </View>
           </TouchableOpacity>
 
-          <Text style={styles.name}>
+          <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>
             {profile.firstName} {profile.lastName}
           </Text>
-          {(profile.gender || age != null) && (
-            <Text style={styles.heroSub}>
-              {profile.gender ?? ""}{profile.gender && age != null ? " · " : ""}{age != null ? `Age ${age}` : ""}
-            </Text>
-          )}
+          <Text style={[styles.subtitle, { color: p.muted }]}>{subtitle}</Text>
 
-          <TouchableOpacity style={styles.editButton} onPress={openEdit}>
-            <Pencil color={colors.accentText} size={14} />
-            <Text style={styles.editButtonText}>Edit profile</Text>
+          <TouchableOpacity onPress={openEdit} activeOpacity={0.7} style={[styles.editBtn, { backgroundColor: p.blue + "1F" }]}>
+            <Text style={[styles.editText, { color: p.blue }]}>Edit profile</Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionLabel}>Profile</Text>
-        <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <View style={styles.infoIconWrap}>
-              <Fingerprint color={colors.accentText} size={15} />
-            </View>
-            <Text style={styles.infoRowLabel}>Profile ID</Text>
-            <Text style={styles.infoRowValue}>{profile.publicId}</Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <View style={styles.infoRow}>
-            <View style={styles.infoIconWrap}>
-              <GenderIcon color={colors.accentText} size={15} />
-            </View>
-            <Text style={styles.infoRowLabel}>Gender</Text>
-            <Text style={styles.infoRowValue}>{profile.gender ?? "Not set"}</Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <TouchableOpacity style={styles.infoRow} onPress={openDobPicker} activeOpacity={0.6}>
-            <View style={styles.infoIconWrap}>
-              <Calendar color={colors.accentText} size={15} />
-            </View>
-            <Text style={styles.infoRowLabel}>Date of birth</Text>
-            {profile.dateOfBirth ? (
-              <Text style={styles.infoRowValue}>
-                {formatDob(profile.dateOfBirth)} · Age {age}
-              </Text>
-            ) : (
-              <Text style={styles.infoRowValuePlaceholder}>Tap to set</Text>
-            )}
-            <ChevronRight color={colors.textFaint} size={16} style={styles.chevron} />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.sectionLabel}>Medical</Text>
-        <View style={[styles.allergyCard, hasAllergies && styles.allergyCardActive]}>
-          <View style={styles.allergyHeader}>
-            <View style={[styles.infoIconWrap, hasAllergies && styles.infoIconWrapDanger]}>
-              <AlertTriangle color={hasAllergies ? colors.danger : colors.accentText} size={15} />
-            </View>
-            <Text style={styles.allergyLabel}>Allergies</Text>
-            {hasAllergies && (
-              <View style={styles.allergyBadge}>
-                <Text style={styles.allergyBadgeText}>Important</Text>
+        {/* personal */}
+        <Text style={[styles.section, { color: p.muted }]}>Personal</Text>
+        <View style={groupStyle}>
+          <Row
+            icon={<Calendar color="#FFFFFF" size={16} strokeWidth={2.2} />}
+            iconBg={ICON_BG.dob}
+            label="Date of birth"
+            value={profile.dateOfBirth ? formatDobShort(profile.dateOfBirth) : "Not set"}
+            onPress={openDobPicker}
+          />
+          <Row
+            icon={<GenderIcon color="#FFFFFF" size={16} strokeWidth={2.2} />}
+            iconBg={ICON_BG.sex}
+            label="Sex"
+            value={profile.gender ?? "Not set"}
+            onPress={openEdit}
+          />
+          <Row
+            icon={<Fingerprint color="#FFFFFF" size={16} strokeWidth={2.2} />}
+            iconBg={ICON_BG.id}
+            label="Profile ID"
+            chevron={false}
+            onPress={shareId}
+            last
+            value={
+              <View style={styles.idWrap}>
+                <Text style={[styles.idText, { color: p.muted }]} selectable>
+                  {profile.publicId}
+                </Text>
+                <Text style={[styles.shareText, { color: p.blue }]}>Share</Text>
               </View>
-            )}
-          </View>
-          <Text style={[styles.allergyValue, hasAllergies && styles.allergyValueActive]}>
-            {hasAllergies ? profile.allergies : "None specified"}
-          </Text>
+            }
+          />
         </View>
 
-        <Text style={styles.sectionLabel}>Appearance</Text>
-        <View style={styles.appearanceCard}>
-          <View style={styles.allergyHeader}>
-            <View style={styles.infoIconWrap}>
-              <Sun color={colors.accentText} size={15} />
+        {/* medical */}
+        <Text style={[styles.section, { color: p.muted }]}>Medical</Text>
+        <View style={groupStyle}>
+          <Row
+            icon={<AlertTriangle color="#FFFFFF" size={16} strokeWidth={2.2} />}
+            iconBg={ICON_BG.allergy}
+            label="Allergies"
+            value={hasAllergies ? "" : "None added"}
+            onPress={openEdit}
+            last
+          />
+          {hasAllergies && (
+            <Text style={[styles.allergyText, { color: p.red }]}>{profile.allergies}</Text>
+          )}
+        </View>
+
+        {/* appearance */}
+        <Text style={[styles.section, { color: p.muted }]}>Appearance</Text>
+        <View style={groupStyle}>
+          <View style={styles.row}>
+            <View style={[styles.iconTile, { backgroundColor: p.themeIcon }]}>
+              <Moon color="#FFFFFF" size={15} fill="#FFFFFF" strokeWidth={2} />
             </View>
-            <Text style={styles.allergyLabel}>Theme</Text>
+            <View style={styles.rowBody}>
+              <Text style={[styles.rowLabel, { color: p.text }]}>Theme</Text>
+              <View style={[styles.seg, { backgroundColor: p.segBg }]}>
+                {THEME_OPTIONS.map(({ key, label }) => {
+                  const on = mode === key;
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => setMode(key)}
+                      style={[styles.segItem, on && [styles.segItemOn, { backgroundColor: p.segOn }]]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.segText, { color: p.text }]}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
           </View>
-          <View style={styles.previewRow}>
-            {THEME_OPTIONS.map(({ key, label }) => {
-              const active = mode === key;
-              return (
-                <TouchableOpacity
-                  key={key}
-                  style={styles.previewTile}
-                  activeOpacity={0.85}
-                  onPress={() => setMode(key)}
-                >
-                  <View style={[styles.previewSwatch, active && styles.previewSwatchActive]}>
-                    <ThemePreviewSwatch variant={key} />
-                    {active && (
-                      <View style={styles.previewCheck}>
-                        <Check color={colors.accentText} size={11} strokeWidth={3} />
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[styles.previewLabel, active && styles.previewLabelActive]}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        </View>
+
+        {/* delete */}
+        <View style={[groupStyle, styles.deleteGroup]}>
+          <Pressable
+            onPress={handleDelete}
+            disabled={deleting}
+            style={({ pressed }) => [styles.deleteRow, pressed && { backgroundColor: p.segBg }]}
+          >
+            {deleting ? (
+              <ActivityIndicator color={p.red} />
+            ) : (
+              <Text style={[styles.deleteText, { color: p.red }]}>Delete profile</Text>
+            )}
+          </Pressable>
         </View>
 
         <View style={styles.appFooter}>
-          <Text style={styles.appFooterName}>Skairo Health</Text>
-          <Text style={styles.appFooterVersion}>Version {APP_VERSION}</Text>
+          <Text style={[styles.appFooterName, { color: p.muted }]}>Skairo Health</Text>
+          <Text style={[styles.appFooterVersion, { color: p.faint }]}>Version {APP_VERSION}</Text>
         </View>
       </ScrollView>
-
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.deleteButton} onPress={handleDelete} disabled={deleting}>
-          {deleting ? (
-            <ActivityIndicator color={colors.danger} />
-          ) : (
-            <>
-              <Trash2 color={colors.danger} size={16} />
-              <Text style={styles.deleteButtonText}>Delete profile</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
 
       <Modal visible={editVisible} transparent animationType="fade">
         <KeyboardAvoidingView
@@ -430,7 +475,7 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
               onChangeText={setLastName}
             />
 
-            <Text style={styles.genderLabel}>Gender</Text>
+            <Text style={styles.genderLabel}>Sex</Text>
             <View style={styles.genderRow}>
               <TouchableOpacity
                 style={[styles.genderButton, gender === "Male" && styles.genderButtonActive]}
@@ -526,159 +571,74 @@ export default function ProfileTab({ profile, onProfileUpdated, onProfileDeleted
 const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
 const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
-
-// Subtle, cross-platform elevation so cards read as raised panels
-// rather than flat outlined boxes.
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-  },
-  android: { elevation: 2 },
-  default: {},
-});
-
-const heroShadow = Platform.select({
-  ios: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-  },
-  android: { elevation: 5 },
-  default: {},
-});
+const FONT_MONO = Platform.OS === "ios" ? "Menlo" : "monospace";
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     scrollView: { flex: 1 },
-    list: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24, alignItems: "center" },
+    list: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 130 },
 
-    heroCard: {
-      position: "relative", width: "100%", backgroundColor: colors.accent,
-      borderRadius: 28, overflow: "hidden", paddingVertical: 30, paddingHorizontal: 20,
-      alignItems: "center", marginBottom: 20,
-      ...heroShadow,
+    // header
+    header: { alignItems: "center", paddingTop: 6, paddingBottom: 4 },
+    avatar: {
+      width: 92, height: 92, borderRadius: 46, alignItems: "center", justifyContent: "center", overflow: "hidden",
     },
-    heroPulseLeft: { position: "absolute", left: -36, top: "50%", marginTop: -65, transform: [{ rotate: "8deg" }] },
-    heroPulseRight: { position: "absolute", right: -36, top: "50%", marginTop: -65, transform: [{ rotate: "-8deg" }] },
-
-    avatarWrapper: { marginBottom: 14 },
-    avatarRing: {
-      width: 100, height: 100, borderRadius: 50,
-      alignItems: "center", justifyContent: "center",
-      borderWidth: 1.5, borderColor: colors.onAccentOverlayBorder,
-    },
-    avatarCircle: {
-      width: 88, height: 88, borderRadius: 44, backgroundColor: colors.accentText,
-      alignItems: "center", justifyContent: "center", overflow: "hidden",
-    },
-    avatarImage: { width: 88, height: 88, borderRadius: 44 },
-    avatarText: { color: colors.accent, fontSize: 27, fontFamily: FONT_BOLD, fontWeight: "700" },
+    avatarImage: { width: 92, height: 92, borderRadius: 46 },
+    avatarText: { color: "#FFFFFF", fontSize: 34, fontFamily: FONT_DEMI, fontWeight: "600" },
     cameraBadge: {
-      position: "absolute", right: 0, bottom: -2, width: 27, height: 27, borderRadius: 14,
-      backgroundColor: colors.accent, alignItems: "center", justifyContent: "center",
-      borderWidth: 2.5, borderColor: colors.accentText,
+      position: "absolute", right: -2, bottom: -2, width: 30, height: 30, borderRadius: 15,
+      alignItems: "center", justifyContent: "center", borderWidth: 3,
     },
-    name: { fontSize: 20, fontFamily: FONT_BOLD, fontWeight: "700", color: colors.accentText, letterSpacing: 0.2 },
-    heroSub: { fontSize: 12.5, fontFamily: FONT_MEDIUM, color: colors.onAccentMuted, marginTop: 5, marginBottom: 18 },
-    editButton: {
-      flexDirection: "row", alignItems: "center", gap: 6,
-      paddingHorizontal: 18, paddingVertical: 9, borderRadius: 20,
-      backgroundColor: colors.onAccentOverlay, borderWidth: 1, borderColor: colors.onAccentOverlayBorder,
-    },
-    editButtonText: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.accentText },
+    name: { fontSize: 24, fontFamily: FONT_BOLD, fontWeight: "700", letterSpacing: -0.3, marginTop: 12 },
+    subtitle: { fontSize: 14, fontFamily: FONT_MEDIUM, marginTop: 2 },
+    editBtn: { marginTop: 12, paddingHorizontal: 18, paddingVertical: 7, borderRadius: 18 },
+    editText: { fontSize: 15, fontFamily: FONT_DEMI, fontWeight: "600" },
 
-    sectionLabel: {
-      width: "100%", fontSize: 12, fontFamily: FONT_DEMI, color: colors.textFaint,
-      textTransform: "uppercase", letterSpacing: 0.6,
-      marginBottom: 8, paddingLeft: 4,
+    // grouped list
+    section: {
+      fontSize: 12.5, fontFamily: FONT_MEDIUM, textTransform: "uppercase", letterSpacing: 0.3,
+      marginTop: 22, marginBottom: 6, marginLeft: 16,
+    },
+    group: {
+      borderRadius: 14, overflow: "hidden",
+      shadowColor: "#000", shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
+    },
+    row: { flexDirection: "row", alignItems: "center", paddingLeft: 14, minHeight: 48 },
+    iconTile: { width: 29, height: 29, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+    rowBody: {
+      flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+      marginLeft: 12, paddingRight: 14, minHeight: 48, gap: 10,
+    },
+    rowLabel: { fontSize: 15.5, fontFamily: FONT_MEDIUM },
+    rowRight: { flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 1 },
+    rowValue: { fontSize: 15.5, fontFamily: FONT_MEDIUM, flexShrink: 1 },
+    idWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
+    idText: { fontSize: 14, fontFamily: FONT_MONO },
+    shareText: { fontSize: 15, fontFamily: FONT_DEMI, fontWeight: "600" },
+    allergyText: {
+      fontSize: 14.5, fontFamily: FONT_DEMI, fontWeight: "600",
+      paddingLeft: 55, paddingRight: 14, paddingBottom: 12, marginTop: -6,
     },
 
-    infoCard: {
-      width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      marginBottom: 20, overflow: "hidden",
-      ...cardShadow,
+    // segmented control
+    seg: { flexDirection: "row", borderRadius: 9, padding: 2, width: 180 },
+    segItem: { flex: 1, alignItems: "center", paddingVertical: 5, borderRadius: 7 },
+    segItemOn: {
+      shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1,
     },
-    infoRow: {
-      flexDirection: "row", alignItems: "center", gap: 12,
-      paddingVertical: 14, paddingHorizontal: 14,
-    },
-    infoIconWrap: {
-      width: 30, height: 30, borderRadius: 10, backgroundColor: colors.accent,
-      alignItems: "center", justifyContent: "center",
-    },
-    infoIconWrapDanger: { backgroundColor: colors.dangerBg, borderWidth: 1, borderColor: colors.dangerBorder },
-    infoDivider: { height: 1, backgroundColor: colors.border, marginLeft: 56 },
-    infoRowLabel: { flex: 1, fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted },
-    infoRowValue: { fontSize: 13, fontFamily: FONT_DEMI, color: colors.text },
-    infoRowValuePlaceholder: { fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textFaint },
-    chevron: { marginLeft: 2 },
+    segText: { fontSize: 13, fontFamily: FONT_DEMI, fontWeight: "600" },
 
-    allergyCard: {
-      width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      padding: 14, marginBottom: 20,
-      ...cardShadow,
-    },
-    allergyCardActive: { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder },
-    allergyHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
-    allergyLabel: { flex: 1, fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted },
-    allergyBadge: {
-      paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10, backgroundColor: colors.danger,
-    },
-    allergyBadgeText: { fontSize: 10, fontFamily: FONT_DEMI, color: colors.accentText, letterSpacing: 0.3 },
-    allergyValue: { fontSize: 14, fontFamily: FONT_MEDIUM, color: colors.text, paddingLeft: 42 },
-    allergyValueActive: { color: colors.danger, fontFamily: FONT_DEMI },
+    // delete
+    deleteGroup: { marginTop: 26 },
+    deleteRow: { minHeight: 48, alignItems: "center", justifyContent: "center" },
+    deleteText: { fontSize: 15.5, fontFamily: FONT_MEDIUM, fontWeight: "500" },
 
-    appearanceCard: {
-      width: "100%", backgroundColor: colors.surface, borderRadius: 18, borderWidth: 1, borderColor: colors.border,
-      padding: 14, marginBottom: 4,
-      ...cardShadow,
-    },
-    previewRow: { flexDirection: "row", gap: 10, paddingLeft: 42 },
-    previewTile: { flex: 1, alignItems: "center" },
-    previewSwatch: {
-      width: "100%",
-      aspectRatio: 1.15,
-      borderRadius: 16,
-      overflow: "hidden",
-      borderWidth: 2,
-      borderColor: colors.border,
-      position: "relative",
-      backgroundColor: colors.background,
-    },
-    previewSwatchActive: { borderColor: colors.accent },
-    previewCheck: {
-      position: "absolute",
-      top: 6,
-      right: 6,
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-      backgroundColor: colors.accent,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    previewLabel: { fontSize: 11, fontFamily: FONT_MEDIUM, color: colors.textMuted, marginTop: 8 },
-    previewLabelActive: { color: colors.text, fontFamily: FONT_DEMI },
+    appFooter: { alignItems: "center", marginTop: 22 },
+    appFooterName: { fontSize: 12.5, fontFamily: FONT_DEMI },
+    appFooterVersion: { fontSize: 11.5, fontFamily: FONT_MEDIUM, marginTop: 3 },
 
-    appFooter: { alignItems: "center", marginTop: 26, marginBottom: 4 },
-    appFooterName: { fontSize: 12.5, fontFamily: FONT_DEMI, color: colors.textMuted },
-    appFooterVersion: { fontSize: 11.5, fontFamily: FONT_MEDIUM, color: colors.textFaint, marginTop: 3 },
-
-    footer: {
-      paddingHorizontal: 20, paddingTop: 12, paddingBottom: 120,
-      backgroundColor: colors.background,
-    },
-    deleteButton: {
-      flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-      paddingVertical: 12, borderRadius: 12, backgroundColor: colors.dangerBg,
-      borderWidth: 1, borderColor: colors.dangerBorder,
-    },
-    deleteButtonText: { fontSize: 14, fontFamily: FONT_DEMI, color: colors.danger },
+    // modals (unchanged)
     modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: "center", alignItems: "center" },
     modalBox: { width: "85%", backgroundColor: colors.background, borderRadius: 16, padding: 20 },
     modalTitle: { fontSize: 16, fontFamily: FONT_BOLD, fontWeight: "700", marginBottom: 14, color: colors.text },

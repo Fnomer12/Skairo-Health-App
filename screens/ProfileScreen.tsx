@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, Platform, TouchableOpacity,
+  View, Text, StyleSheet, Platform, TouchableOpacity, Pressable,
   Modal, TextInput, Alert, ActivityIndicator, Image, ScrollView,
   Keyboard, TouchableWithoutFeedback,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Plus, Cloud, Mars, Venus } from "lucide-react-native";
+import { Plus, Cloud, Mars, Venus, AlertTriangle } from "lucide-react-native";
+import GlassButton from "./components/GlassButton";
+import AvatarStack from "./components/AvatarStack";
 import { Profile, Gender, initDatabase, getProfiles, addProfile, fullName } from "../db/profiles";
 import { useTheme, ThemeColors } from "../context/ThemeContext";
 import {
@@ -39,89 +41,12 @@ function formatDob(dateOfBirth: string): string {
   return `${MONTHS[month - 1]} ${day}, ${year}`;
 }
 
-// Mirrors the Apple-ID-style account picker: one profile sits big and
-// centered, two sit side by side at a slightly smaller size, and anything
-// from three up to the 8-profile cap settles into a neat, uniform grid.
-function getAvatarSize(count: number): number {
-  if (count <= 1) return 118;
-  if (count === 2) return 100;
-  if (count <= 4) return 88;
-  return 76;
-}
-
-// Only the two-profile case gets a playful vertical stagger — the "floating
-// bubbles" look — everything from three up behaves the same (a plain grid).
-function getBubbleOffset(count: number, index: number): number {
-  if (count === 2) return index % 2 === 0 ? -10 : 10;
-  return 0;
-}
-
-// The colorful "confetti ring" halo that radiates around each avatar —
-// three rings of small, rainbow-hued dots placed with simple trig so the
-// scatter is deterministic (same avatar always gets the same halo) instead
-// of re-randomizing on every render.
-type HaloDot = { x: number; y: number; size: number; color: string };
-
-function buildHaloDots(avatarSize: number): HaloDot[] {
-  const baseRadius = avatarSize / 2;
-  const rings: Array<{ radius: number; count: number; dotSize: number; hueOffset: number }> = [
-    { radius: baseRadius * 1.16, count: 10, dotSize: avatarSize * 0.05, hueOffset: 0 },
-    { radius: baseRadius * 1.34, count: 14, dotSize: avatarSize * 0.065, hueOffset: 55 },
-    { radius: baseRadius * 1.52, count: 9, dotSize: avatarSize * 0.04, hueOffset: 120 },
-  ];
-
-  const dots: HaloDot[] = [];
-  rings.forEach((ring, ringIndex) => {
-    for (let i = 0; i < ring.count; i++) {
-      const angle = (i / ring.count) * Math.PI * 2 + ringIndex * 0.35;
-      // Deterministic per-dot jitter (trig-based, not random) so the ring
-      // reads as scattered confetti rather than a perfect circle of dots.
-      const radiusJitter = 1 + Math.sin(angle * 3 + ringIndex) * 0.08;
-      const radius = ring.radius * radiusJitter;
-      const sizeJitter = 0.8 + Math.abs(Math.sin(angle * 2 + ringIndex)) * 0.4;
-      const hue = Math.round((angle * (180 / Math.PI) + ring.hueOffset) % 360);
-      dots.push({
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius,
-        size: ring.dotSize * sizeJitter,
-        color: `hsl(${hue}, 78%, 58%)`,
-      });
-    }
-  });
-  return dots;
-}
-
-const AvatarHalo = React.memo(function AvatarHalo({ avatarSize }: { avatarSize: number }) {
-  const dots = useMemo(() => buildHaloDots(avatarSize), [avatarSize]);
-  const haloSize = avatarSize * 1.75;
-  const offset = (avatarSize - haloSize) / 2;
-
-  return (
-    <View
-      pointerEvents="none"
-      style={{ position: "absolute", width: haloSize, height: haloSize, left: offset, top: offset }}
-    >
-      {dots.map((dot, i) => (
-        <View
-          key={i}
-          style={{
-            position: "absolute",
-            left: haloSize / 2 + dot.x - dot.size / 2,
-            top: haloSize / 2 + dot.y - dot.size / 2,
-            width: dot.size,
-            height: dot.size,
-            borderRadius: dot.size / 2,
-            backgroundColor: dot.color,
-          }}
-        />
-      ))}
-    </View>
-  );
-});
-
 export default function ProfileScreen({ onSelectProfile }: Props) {
-  const { colors } = useTheme();
+  const { colors, resolvedScheme } = useTheme();
   const styles = createStyles(colors);
+  const isDark = resolvedScheme === "dark";
+  const blue = isDark ? "#0A84FF" : "#007AFF";
+  const red = isDark ? "#FF453A" : "#FF3B30";
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,12 +71,6 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
   const passphraseResolver = useRef<((value: string | null) => void) | null>(null);
 
   const atCapacity = profiles.length >= MAX_PROFILES;
-  const avatarSize = getAvatarSize(profiles.length || 1);
-  // The halo radiates out to ~1.75x the avatar size, so the grid needs extra
-  // breathing room between bubbles (and a wider wrap column) to keep
-  // neighboring halos from overlapping.
-  const bubbleColumnWidth = avatarSize * 1.7;
-  const gridGap = avatarSize * 0.85;
 
   const insets = useSafeAreaInsets();
 
@@ -323,110 +242,127 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
     setAddVisible(true); // hand control back to the New profile modal
   }
 
-  return (
+    return (
     <View style={styles.container}>
-      <Text style={styles.brandTitle}>Skairo Health</Text>
+      {/* header — brand label, large title, glass buttons */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Profiles</Text>
-          <Text style={styles.countText}>{profiles.length}/{MAX_PROFILES} users</Text>
+        <View style={styles.headerText}>
+          <Text style={[styles.brand, { color: blue }]}>SKAIRO HEALTH</Text>
+          <Text style={styles.title}>{profiles.length ? "Profile" : "Welcome"}</Text>
+                    <View style={styles.countRow}>
+            {profiles.length > 0 && (
+              <AvatarStack
+                people={profiles.map((p) => ({ id: p.id, name: fullName(p), photoUri: p.photoUri }))}
+                max={3}
+                size={24}
+                ringColor={colors.background}
+                overflowBg={isDark ? "#2C2C2E" : "#F2F2F5"}
+                overflowText={colors.text}
+              />
+            )}
+            <Text style={styles.countText}>
+              {profiles.length} of {MAX_PROFILES} profiles
+            </Text>
+          </View>
         </View>
-        <TouchableOpacity
-          style={styles.cloudButton}
-          onPress={handleConnectDrive}
-          onLongPress={handleDebugCheckDrive}
-          disabled={drivePending}
-        >
-          {drivePending ? (
-            <ActivityIndicator size="small" color={colors.text} />
-          ) : (
-            <Cloud color={colors.text} size={18} />
-          )}
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <GlassButton
+            onPress={handleConnectDrive}
+            onLongPress={handleDebugCheckDrive}
+            disabled={drivePending}
+            isDark={isDark}
+            accessibilityLabel={connectedEmail ? "Back up to Google Drive" : "Connect Google Drive"}
+          >
+            {drivePending ? (
+              <ActivityIndicator size="small" color={colors.text} />
+            ) : (
+              <Cloud color={colors.text} size={19} strokeWidth={2.2} />
+            )}
+          </GlassButton>
+          <GlassButton onPress={openAdd} isDark={isDark} accessibilityLabel="Add profile">
+            <Plus color={colors.text} size={21} strokeWidth={2.4} />
+          </GlassButton>
+        </View>
       </View>
-
-      <Text style={styles.driveAccountText}>
-        {connectedEmail ? `Google Drive: ${connectedEmail}` : "Google Drive: not connected"}
-      </Text>
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={colors.text} />
       ) : (
         <ScrollView
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.grid, { gap: gridGap }]}>
-            {profiles.map((item, index) => {
+          <View style={styles.grid}>
+            {profiles.map((item) => {
               const initials = `${item.firstName?.[0] ?? ""}${item.lastName?.[0] ?? ""}`.toUpperCase();
-              const offsetY = getBubbleOffset(profiles.length, index);
               return (
-                <TouchableOpacity
+                <Pressable
                   key={item.id}
-                  style={[styles.bubbleWrap, { width: bubbleColumnWidth, transform: [{ translateY: offsetY }] }]}
+                  style={({ pressed }) => [styles.cell, pressed && { transform: [{ scale: 0.96 }] }]}
                   onPress={() => onSelectProfile(item)}
-                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${fullName(item)}`}
                 >
-                  <View style={[styles.avatarSlot, { width: avatarSize, height: avatarSize }]}>
-                    <AvatarHalo avatarSize={avatarSize} />
-                    <View
-                      style={[
-                        styles.avatarBubble,
-                        { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 },
-                      ]}
-                    >
-                      {item.photoUri ? (
-                        <Image
-                          source={{ uri: item.photoUri }}
-                          style={{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }}
-                        />
-                      ) : (
-                        <Text style={[styles.avatarText, { fontSize: avatarSize * 0.32 }]}>{initials}</Text>
-                      )}
-                    </View>
+                  <View style={[styles.avatar, { backgroundColor: isDark ? "#5B6577" : "#8E99AB" }]}>
+                    {item.photoUri ? (
+                      <Image source={{ uri: item.photoUri }} style={styles.avatarImage} />
+                    ) : (
+                      <Text style={styles.avatarText}>{initials}</Text>
+                    )}
                   </View>
-                  <Text style={styles.bubbleName} numberOfLines={2}>
-                    {fullName(item)}
+                  <Text style={styles.name} numberOfLines={1}>
+                    {item.firstName}
                   </Text>
                   {item.allergies ? (
-                    <Text style={styles.bubbleSub} numberOfLines={1}>
-                      Allergies: {item.allergies}
-                    </Text>
-                  ) : null}
-                </TouchableOpacity>
+                    <View style={styles.allergyRow}>
+                      <AlertTriangle color={red} fill={red} size={11} strokeWidth={0} />
+                      <Text style={[styles.allergyText, { color: red }]} numberOfLines={1}>
+                        {item.allergies}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.noAllergy}>No allergies</Text>
+                  )}
+                </Pressable>
               );
             })}
 
             {!atCapacity && (
-              <TouchableOpacity
-                style={[styles.bubbleWrap, { width: bubbleColumnWidth }]}
+              <Pressable
+                style={({ pressed }) => [styles.cell, pressed && { opacity: 0.6 }]}
                 onPress={openAdd}
-                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Add profile"
               >
-                <View
-                  style={[
-                    styles.addBubble,
-                    { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 },
-                  ]}
-                >
-                  <Plus color={colors.textFaint} size={avatarSize * 0.28} />
+                <View style={[styles.addCircle, { borderColor: isDark ? "#48484A" : "#C7C7CC" }]}>
+                  <Plus color={colors.textMuted} size={30} strokeWidth={2} />
                 </View>
-                <Text style={styles.bubbleNameMuted}>
+                <Text style={[styles.name, { color: colors.textMuted }]}>
                   {profiles.length === 0 ? "Add profile" : "Add another"}
                 </Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
           </View>
 
           {atCapacity && (
-            <Text style={styles.capacityNote}>You've reached the {MAX_PROFILES}-profile limit.</Text>
+            <Text style={styles.note}>You've reached the {MAX_PROFILES}-profile limit.</Text>
           )}
           {profiles.length === 0 && (
-            <Text style={styles.emptyHint}>Tap the circle above to add your first profile.</Text>
+            <Text style={styles.note}>Add a profile for each person who uses this device.</Text>
           )}
+
+          {/* Google Drive status — one quiet line */}
+          <Pressable onPress={handleConnectDrive} disabled={drivePending} style={styles.driveRow}>
+            <View style={[styles.driveDot, { backgroundColor: connectedEmail ? "#34C759" : colors.textFaint }]} />
+            <Text style={styles.driveText} numberOfLines={1}>
+              {connectedEmail ? `Backing up to ${connectedEmail}` : "Google Drive backup off · "}
+              {!connectedEmail && <Text style={{ color: blue, fontFamily: FONT_DEMI }}>Connect</Text>}
+            </Text>
+          </Pressable>
         </ScrollView>
       )}
 
-      <Modal visible={addVisible} transparent animationType="fade">
+            <Modal visible={addVisible} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalBackdrop}>
             <View style={styles.modalBox}>
@@ -582,101 +518,60 @@ export default function ProfileScreen({ onSelectProfile }: Props) {
   );
 }
 
+
 const FONT_BOLD = Platform.OS === "ios" ? "AvenirNext-Bold" : undefined;
 const FONT_MEDIUM = Platform.OS === "ios" ? "AvenirNext-Medium" : undefined;
 const FONT_DEMI = Platform.OS === "ios" ? "AvenirNext-DemiBold" : undefined;
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background, paddingTop: 60 },
-    brandTitle: {
-      textAlign: "center",
-      fontSize: 26,
-      fontFamily: FONT_BOLD,
-      fontWeight: "800",
-      color: colors.text,
-      marginBottom: 16,
-      letterSpacing: 0.3,
-    },
+     container: { flex: 1, backgroundColor: colors.background, paddingTop: 60 },
     header: {
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-      paddingHorizontal: 20, marginBottom: 10,
+      flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between",
+      paddingHorizontal: 20, gap: 12,
     },
-    title: { fontSize: 24, fontFamily: FONT_BOLD, fontWeight: "700", color: colors.text },
-    countText: { fontSize: 12, color: colors.textFaint, fontFamily: FONT_MEDIUM, marginTop: 2 },
-    cloudButton: {
-      width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceAlt,
-      alignItems: "center", justifyContent: "center",
-      borderWidth: 1, borderColor: colors.border,
+    headerText: { flex: 1 },
+    headerButtons: { flexDirection: "row", gap: 10, marginTop: 4 },
+    brand: { fontSize: 13, fontFamily: FONT_BOLD, fontWeight: "700", letterSpacing: 0.4 },
+    title: {
+      fontSize: 32, fontFamily: FONT_BOLD, fontWeight: "700", color: colors.text,
+      letterSpacing: -0.5, marginTop: 2, lineHeight: 38,
     },
-    driveAccountText: {
-      fontSize: 11,
-      fontFamily: FONT_MEDIUM,
-      color: colors.textFaint,
-      textAlign: "center",
-      marginBottom: 14,
-    },
+        countRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+    countText: { fontSize: 14, color: colors.textMuted, fontFamily: FONT_MEDIUM },
 
-    scrollContent: {
-      flexGrow: 1,
-      justifyContent: "center",
-      alignItems: "center",
-      paddingTop: 24,
-    },
-    grid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      justifyContent: "center",
-      alignItems: "flex-start",
-      gap: 26,
-      paddingHorizontal: 20,
-      width: "100%",
-    },
-    bubbleWrap: { alignItems: "center", width: 112 },
-    avatarSlot: { alignItems: "center", justifyContent: "center", position: "relative" },
-    avatarBubble: {
-      backgroundColor: colors.accent,
-      alignItems: "center",
-      justifyContent: "center",
-      overflow: "hidden",
+    scrollContent: { paddingTop: 30, paddingHorizontal: 20 },
+    grid: { flexDirection: "row", flexWrap: "wrap", rowGap: 26 },
+    cell: { width: "50%", alignItems: "center" },
+    avatar: {
+      width: 112, height: 112, borderRadius: 56,
+      alignItems: "center", justifyContent: "center", overflow: "hidden",
       ...Platform.select({
-        ios: {
-          shadowColor: "#000000",
-          shadowOpacity: 0.18,
-          shadowRadius: 10,
-          shadowOffset: { width: 0, height: 6 },
-        },
-        android: { elevation: 6 },
+        ios: { shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 6 } },
+        android: { elevation: 4 },
       }),
     },
-    avatarText: { color: colors.accentText, fontFamily: FONT_BOLD, fontWeight: "700" },
-    bubbleName: {
-      marginTop: 10, fontSize: 13, fontFamily: FONT_DEMI, color: colors.text,
-      textAlign: "center",
+    avatarImage: { width: 112, height: 112, borderRadius: 56 },
+    avatarText: { color: "#FFFFFF", fontSize: 38, fontFamily: FONT_DEMI, fontWeight: "600" },
+    name: {
+      marginTop: 10, fontSize: 16, fontFamily: FONT_DEMI, fontWeight: "600", color: colors.text,
+      textAlign: "center", maxWidth: 150,
     },
-    bubbleSub: {
-      fontSize: 10, fontFamily: FONT_MEDIUM, color: colors.textFaint,
-      textAlign: "center", marginTop: 2,
+    allergyRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, maxWidth: 150 },
+    allergyText: { fontSize: 12.5, fontFamily: FONT_DEMI, fontWeight: "600" },
+    noAllergy: { fontSize: 12.5, fontFamily: FONT_MEDIUM, color: colors.textFaint, marginTop: 2 },
+    addCircle: {
+      width: 112, height: 112, borderRadius: 56, borderWidth: 1.5, borderStyle: "dashed",
+      alignItems: "center", justifyContent: "center",
     },
-    addBubble: {
-      backgroundColor: colors.surfaceAlt,
-      borderWidth: 1.5,
-      borderColor: colors.border,
-      borderStyle: "dashed",
-      alignItems: "center",
-      justifyContent: "center",
+    note: {
+      fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textMuted, textAlign: "center", marginTop: 24,
     },
-    bubbleNameMuted: {
-      marginTop: 10, fontSize: 13, fontFamily: FONT_MEDIUM, color: colors.textFaint,
-      textAlign: "center",
+    driveRow: {
+      flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 34,
     },
-    capacityNote: {
-      fontSize: 12, fontFamily: FONT_MEDIUM, color: colors.textFaint, textAlign: "center", marginTop: 22,
-    },
-    emptyHint: {
-      fontSize: 12, fontFamily: FONT_MEDIUM, color: colors.textFaint, textAlign: "center", marginTop: 22,
-    },
-
+    driveDot: { width: 7, height: 7, borderRadius: 4 },
+    driveText: { fontSize: 12.5, fontFamily: FONT_MEDIUM, color: colors.textMuted, flexShrink: 1 },
     modalBackdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: "center", alignItems: "center" },
     modalBox: { width: "85%", backgroundColor: colors.background, borderRadius: 16, padding: 20 },
     modalTitle: { fontSize: 16, fontFamily: FONT_BOLD, fontWeight: "700", marginBottom: 14, color: colors.text },
