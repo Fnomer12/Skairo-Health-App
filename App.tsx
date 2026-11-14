@@ -24,6 +24,8 @@ function AppContent() {
   const [screen, setScreen] = useState<Screen>("profiles");
   const [showSplash, setShowSplash] = useState(true);
 
+    const [autoReading, setAutoReading] = useState(false); // start a reading after connecting
+
   useEffect(() => {
     SplashScreen.hideAsync().catch(() => {});
   }, []);
@@ -55,7 +57,13 @@ function AppContent() {
             }}
           />
         ) : screen === "connect" ? (
-          <ConnectScreen onBack={() => setScreen("records")} />
+          <ConnectScreen
+            onBack={() => setScreen("records")}
+            onTakeReading={() => {
+              setAutoReading(true);
+              setScreen("records");
+            }}
+          />
         ) : (
           <RecordsScreen
             profile={activeProfile}
@@ -65,6 +73,8 @@ function AppContent() {
             }}
             onConnect={() => setScreen("connect")}
             onProfileUpdated={(p) => setActiveProfile(p)}
+            autoReading={autoReading}
+            onAutoReadingDone={() => setAutoReading(false)}
           />
         )}
       </BleProvider>

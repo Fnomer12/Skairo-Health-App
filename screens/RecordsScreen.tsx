@@ -21,6 +21,8 @@ type Props = {
   onBack: () => void;
   onConnect: () => void;
   onProfileUpdated: (updated: Profile) => void;
+  autoReading?: boolean; // true when the user tapped "Take a reading" on the Connect screen
+  onAutoReadingDone?: () => void;
 };
 
 type TabKey = "dashboard" | "intake" | "profile";
@@ -37,7 +39,14 @@ const TAB_ITEMS: Array<LiquidTabItem & { key: TabKey }> = [
   { key: "profile", label: "Profile", Icon: ProfileIcon, fx: "wave" },
 ];
 
-export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpdated }: Props) {
+export default function RecordsScreen({
+  profile,
+  onBack,
+  onConnect,
+  onProfileUpdated,
+  autoReading = false,
+  onAutoReadingDone,
+}: Props) {
   const { colors, resolvedScheme } = useTheme();
   const styles = createStyles(colors);
 
@@ -159,6 +168,15 @@ export default function RecordsScreen({ profile, onBack, onConnect, onProfileUpd
       setTakingReading(false);
     }
   }
+
+    // came back from the Connect screen with "Take a reading" → start it once
+  useEffect(() => {
+    if (autoReading && connectedDevice) {
+      onAutoReadingDone?.();
+      handleTakeReading();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReading, connectedDevice]);
 
   async function handleDeleteRecord(id: number) {
     try {
